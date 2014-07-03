@@ -1,18 +1,18 @@
+#define __STDC_FORMAT_MACROS
+
+#include <fcntl.h>
+#include <getopt.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
-#include <unistd.h>
-#include <getopt.h>
 #include <termios.h>
+#include <unistd.h>
 
-#define __STDC_FORMAT_MACROS
-#include <inttypes.h>
-
-// From sysexits.h:
+/* From sysexits.h: */
 #define EX_OK           0       /* successful termination */
-#define EX__BASE        64      /* base value for error messages */
 #define EX_USAGE        64      /* command line usage error */
 #define EX_DATAERR      65      /* data format error */
 #define EX_NOINPUT      66      /* cannot open input */
@@ -50,6 +50,8 @@ struct program_options_t {
         bool terminal_color_output{false};
         bool input_is_terminal{false};
 
+        struct termios vt_orig;
+
         uint64_t byte_skip_offset{0};
         uint64_t byte_skip_limit{0};
         uint64_t bytes_into_input{0};
@@ -66,14 +68,19 @@ struct program_options_t {
                 error_count++;
                 if (error_reporting == error_reporting_t::REPORT_STDERR) {
                         fflush(stdout);
-                        char const* color_prefix = terminal_color_output ? "\e[31m" : "";
-                        char const* color_suffix = terminal_color_output ? "\e[m" : "";
+                        char const* color_prefix = terminal_color_output ? "\x1B[31m" : "";
+                        char const* color_suffix = terminal_color_output ? "\x1B[m" : "";
                         fprintf(stderr, "%sutfdecode: decoding error after %" PRIu64 " bytes and %" PRIu64 " code points - %s%s\n", color_prefix, bytes_into_input, codepoints_into_input, error_msg, color_suffix);
                         fflush(stderr);
                 }
                 if (error_handling == error_handling_t::ABORT) {
                         exit(EX_DATAERR);
                 }
+        }
+
+        void cleanup_and_exit(int exit_status) {
+                if (input_is_terminal) tcsetattr(0, TCSANOW, &vt_orig);
+                exit(exit_status);
         }
 };
 
@@ -199,6 +206,16 @@ void describe_codepoint(uint32_t codepoint, program_options_t& program) {
                 int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
                 utf8_buffer[utf8_byte_count] = 0;
                 printf("%s", utf8_buffer);
+                fflush(stdout);
+        } else if (program.output_format == output_format_t::UTF32LE) {
+                uint8_t buffer[5];
+                printf("%s", buffer);
+                fflush(stdout);
+                for (int i = 0; i < 4; i++) buffer[i] = 0b11111111 & (codepoint >> (3-i));
+        } else if (program.output_format == output_format_t::UTF32BE) {
+                uint8_t buffer[5];
+                for (int i = 0; i < 4; i++) buffer[i] = 0b11111111 & (codepoint >> i);
+                printf("%s", buffer);
                 fflush(stdout);
         }
 }
@@ -382,8 +399,8 @@ void read_and_echo(program_options_t& options) {
         }
 }
 
-void print_usage_and_exit(char const* program_name) {
-        fprintf(stderr, "usage: %s [OPTIONS]\n"
+void print_usage_and_exit(char const* program_name, int exit_status) {
+        fprintf(stderr, "usage: %s [OPTIONS] [file]\n"
                         "  -d, --decode-format FORMAT     Determine how input should be decoded:\n"
                         "                                     * utf8 (default) - decode input as UTF-8\n"
                         "                                     * codepoint - decode input as textual U+XXXX descriptions\n"
@@ -402,7 +419,7 @@ void print_usage_and_exit(char const* program_name) {
                         "  -s, --summary                  Show a summary at end of input\n"
                         "  -t, --timestamps               Show a timestamp after each input read\n"
                         , program_name);
-        exit(EX_USAGE);
+        exit(exit_status);
 }
 
 int main(int argc, char** argv) {
@@ -426,6 +443,7 @@ int main(int argc, char** argv) {
                 int c = getopt_long(argc, argv, "d:e:hl:m:no:qst", getopt_options, &option_index);
                 if (c == -1) break;
                 bool print_error_and_exit = false;
+                int exit_status = EX_USAGE;
                 switch (c) {
                         case 'd':
                                 if (strcmp(optarg, "utf8") == 0) {
@@ -444,12 +462,20 @@ int main(int argc, char** argv) {
                                         options.output_format = output_format_t::DESCRIPTION_DECODING;
                                 } else if (strcmp(optarg, "utf8") == 0) {
                                         options.output_format = output_format_t::UTF8;
+                                } else if (strcmp(optarg, "utf32le") == 0) {
+                                        options.output_format = output_format_t::UTF32LE;
+                                } else if (strcmp(optarg, "utf32be") == 0) {
+                                        options.output_format = output_format_t::UTF32BE;
                                 } else if (strcmp(optarg, "silent") == 0) {
                                         options.output_format = output_format_t::SILENT;
                                 } else {
                                         fprintf(stderr, "'%s' is not a valid encode format\n", optarg);
                                         print_error_and_exit = true;
                                 }
+                                break;
+                        case 'h':
+                                exit_status = EX_OK;
+                                print_error_and_exit = true;
                                 break;
                         case 'l':
                                 options.byte_skip_limit = atoi(optarg);
@@ -493,10 +519,23 @@ int main(int argc, char** argv) {
                                 print_error_and_exit = true;
                                 break;
                 }
-                if (print_error_and_exit) print_usage_and_exit(argv[0]);
+                if (print_error_and_exit) print_usage_and_exit(argv[0], exit_status);
         }
 
-        if (optind < argc) print_usage_and_exit(argv[0]);
+        if (optind + 1 == argc) {
+                int file_fd = open(argv[optind], O_RDONLY);
+                if (file_fd < -1) {
+                        perror("open()");
+                        return EX_NOINPUT;
+                }
+                if (dup2(file_fd, STDIN_FILENO)) {
+                        perror("dup2()");
+                        return EX_IOERR;
+                }
+                close(file_fd);
+        } else if (optind < argc) {
+                print_usage_and_exit(argv[0], EX_USAGE);
+        }
 
         bool is_output_tty = isatty(STDOUT_FILENO);
         if (is_output_tty) options.terminal_color_output = true;
@@ -504,10 +543,9 @@ int main(int argc, char** argv) {
         // If inputting textual code points, do not special case terminal input:
         options.input_is_terminal = (options.input_format != input_format_t::TEXTUAL_CODEPOINT) && isatty(STDIN_FILENO);
 
-        struct termios vt_orig;
         if (options.input_is_terminal) {
-                tcgetattr(0, &vt_orig);
-                struct termios vt_new = vt_orig;
+                tcgetattr(0, &options.vt_orig);
+                struct termios vt_new = options.vt_orig;
                 vt_new.c_cc[VMIN] = 1; 	// Minimum number of characters for noncanonical read (MIN).
                 vt_new.c_cc[VTIME] = 0; 	// Timeout in deciseconds for noncanonical read (TIME).
                 // echo off, canonical mode off, extended input processing off, signal chars off:
@@ -516,7 +554,6 @@ int main(int argc, char** argv) {
                 tcsetattr(STDIN_FILENO, TCSANOW, &vt_new);
         }
         read_and_echo(options);
-        if (options.input_is_terminal) tcsetattr(0, TCSANOW, &vt_orig);
 
         if (options.print_summary) {
                 fprintf(stderr, "Summary: %" PRIu64 " code points decoded from %" PRIu64 " bytes with %" PRIu64 " errors\n", options.codepoints_into_input, options.bytes_into_input, options.error_count);
@@ -525,5 +562,6 @@ int main(int argc, char** argv) {
                 printf("\n");
         }
 
-        return options.error_count == 0 ? 0 : EX_DATAERR;
+        int exit_status = options.error_count == 0 ? EX_OK : EX_DATAERR;
+        options.cleanup_and_exit(exit_status);
 }
