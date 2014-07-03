@@ -1,5 +1,4 @@
-AM_CFLAGS = -Wall -Wextra -pedantic -std=c99 -Wno-gnu-binary-literal -Os
-AM_CXXFLAGS = -Wall -Wextra -std=c++11 -Wno-gnu-binary-literal -Os
+AM_CXXFLAGS = -Wall -Wextra -std=c++1y -pedantic -Os
 
 bin_PROGRAMS = utfdecode
 
