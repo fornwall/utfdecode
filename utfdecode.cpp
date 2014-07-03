@@ -386,7 +386,7 @@ void print_usage_and_exit(char const* program_name) {
         fprintf(stderr, "usage: %s [OPTIONS]\n"
                         "  -d, --decode-format FORMAT     Determine how input should be decoded:\n"
                         "                                     * utf8 (default) - decode input as UTF-8\n"
-                        "                                     * textual - decode input as textual U+XXXX descriptions\n"
+                        "                                     * codepoint - decode input as textual U+XXXX descriptions\n"
                         "  -e, --encode-format FORMAT      Determine what output should be written:\n"
                         "                                     * decoding (default) - debug output of the complete decoding process\n"
                         "                                     * codepoint - resulting code points in a U+XXXX format\n"
@@ -430,7 +430,7 @@ int main(int argc, char** argv) {
                         case 'd':
                                 if (strcmp(optarg, "utf8") == 0) {
                                         options.input_format = input_format_t::UTF8;
-                                } else if (strcmp(optarg, "textual") == 0) {
+                                } else if (strcmp(optarg, "codepoint") == 0) {
                                         options.input_format = input_format_t::TEXTUAL_CODEPOINT;
                                 } else {
                                         fprintf(stderr, "'%s' is not a valid decode format\n", optarg);
@@ -525,5 +525,5 @@ int main(int argc, char** argv) {
                 printf("\n");
         }
 
-        return 0;
+        return options.error_count == 0 ? 0 : EX_DATAERR;
 }
