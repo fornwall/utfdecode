@@ -2,9 +2,9 @@
 #define _XOPEN_SOURCE
 
 #include <fcntl.h>
-#include "musl/wcwidth_musl.h"
 #include <getopt.h>
 #include <inttypes.h>
+#include <locale.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,7 +13,8 @@
 #include <termios.h>
 #include <unistd.h>
 #include <wchar.h>
-#include <locale.h>
+
+#include "musl/wcwidth_musl.h"
 #include "unicode_blocks.hpp"
 
 /* From sysexits.h: */
@@ -22,11 +23,8 @@
 #define EX_DATAERR      65      /* data format error */
 #define EX_NOINPUT      66      /* cannot open input */
 #define EX_SOFTWARE     70      /* internal software error */
-#define EX_OSERR        71      /* system error (e.g., can't fork) */
-#define EX_OSFILE       72      /* critical OS file missing */
 #define EX_IOERR        74      /* input/output error */
 #define EX_NOPERM       77      /* permission denied */
-#define EX_CONFIG       78      /* configuration error */
 
 enum class input_format_t { UTF8, UTF16BE, UTF16LE, UTF32LE, UTF32BE, TEXTUAL_CODEPOINT };
 enum class output_format_t { UTF8, UTF16BE, UTF16LE, UTF32LE, UTF32BE, DESCRIPTION_CODEPOINT, DESCRIPTION_DECODING, SILENT };
@@ -68,15 +66,22 @@ struct program_options_t {
         //void check_exit_on_error() { if (error_handling == error_handling_t::ABORT) exit(EX_DATAERR); }
         bool is_replace_errors() { return error_handling == error_handling_t::REPLACE; }
 
-        void note_error(char const* error_msg, ...) {
+        void output_formatted_byte(FILE* where, uint8_t byte) {
+                fprintf(where, "0x%02X - ", (int) byte);
+        }
+
+
+        void note_error(int byte, char const* error_msg, ...) {
                 error_count++;
                 if (error_reporting == error_reporting_t::REPORT_STDERR) {
                         fflush(stdout);
                         char const* color_prefix = terminal_color_output ? "\x1B[31m" : "";
                         char const* color_suffix = terminal_color_output ? "\x1B[m" : "";
-                        fprintf(stderr, "%smalformed %" PRIu64 " bytes and %" PRIu64 " characters in - ",
-                                        color_prefix, bytes_into_input, codepoints_into_input);
-
+                        fprintf(stderr, "%s", color_prefix);
+                        output_formatted_byte(stderr, byte);
+                        fprintf(stderr, "malformed %" PRIu64 " %s and %" PRIu64 " %s in - ",
+                                        bytes_into_input, (bytes_into_input == 1 ? "byte" : "bytes"),
+                                        codepoints_into_input, codepoints_into_input == 1 ? "character" : "characters");
                         va_list argp;
                         va_start(argp, error_msg);
                         vfprintf(stderr, error_msg, argp);
@@ -84,12 +89,15 @@ struct program_options_t {
 
                         fprintf(stderr, "%s\n", color_suffix);
                         fflush(stderr);
+                } else {
+                        if (print_byte_input()) output_formatted_byte(stdout, byte);
                 }
+
                 if (error_handling == error_handling_t::ABORT) {
                         exit(EX_DATAERR);
                 }
         }
-
+        
         void cleanup_and_exit(int exit_status) {
                 if (input_is_terminal) tcsetattr(0, TCSANOW, &vt_orig);
                 exit(exit_status);
@@ -102,10 +110,15 @@ struct program_options_t {
                 buffer[2] = 0;
         }
 
-        void print_byte(int byte) {
-                if (print_byte_input()) printf("0x%02X - ", (int) byte);
+        void print_byte_result(int byte, char const* msg, ...) {
+                if (print_byte_input()) {
+                        output_formatted_byte(stdout, byte);
+                        va_list argp;
+                        va_start(argp, msg);
+                        vfprintf(stdout, msg, argp);
+                        va_end(argp);
+                }
         }
-
 };
 
 /* Assumes that the buffer is already validated. Does not handle overlong encodings. */
@@ -160,49 +173,49 @@ void encode_codepoint(uint32_t codepoint, program_options_t& program) {
 
         if (program.output_format == output_format_t::DESCRIPTION_DECODING || program.output_format == output_format_t::DESCRIPTION_CODEPOINT) {
                 printf("U+%04X", codepoint);
-                if (codepoint <= 127 && program.output_format == output_format_t::DESCRIPTION_DECODING) {
-                        switch (codepoint) {
-                                case 0:   printf(" Null character		^@	\\0"); break;
-                                case 1:   printf(" Start of Header		^A	 "); break;
-                                case 2:   printf(" Start of Text			^B	 "); break;
-                                case 3:   printf(" End of Text			^C	 "); break;
-                                case 4:   printf(" End of Transmission		^D	 "); break;
-                                case 5:   printf(" Enquiry			^E	 "); break;
-                                case 6:   printf(" Acknowledgement		^F	 "); break;
-                                case 7:   printf(" Bell				^G	 "); break;
-                                case 8:   printf(" Backspace			^H	\\b"); break;
-                                case 9:   printf(" Horizontal tab		^I	\\t"); break;
-                                case 10:  printf(" Line feed (^J, \\n)"); break;
-                                case 11:  printf(" Vertical tab			^K	\\v"); break;
-                                case 12:  printf(" Form feed			^L	\\f"); break;
-                                case 13:  printf(" Carriage return (^M, \\r"); break;
-                                case 14:  printf(" Start of Text			^N	  "); break;
-                                case 15:  printf(" Shift In			^O	  "); break;
-                                case 16:  printf(" Shift Out			^P	  "); break;
-                                case 17:  printf(" Device Control 1		^Q	  "); break;
-                                case 18:  printf(" Device Control 2		^R	  "); break;
-                                case 19:  printf(" Device Control 3		^S	  "); break;
-                                case 20:  printf(" Device Control 4		^T	  "); break;
-                                case 21:  printf(" Negative Acknowledgement	^U	  "); break;
-                                case 22:  printf(" Synchronous idle		^V	  "); break;
-                                case 23:  printf(" End of Transmission Block	^W	  "); break;
-                                case 24:  printf(" Cancel			^X	  "); break;
-                                case 25:  printf(" End of Medium			^Y	  "); break;
-                                case 26:  printf(" Substitute			^Z	  "); break;
-                                case 27:  printf(" Escape			^[	\\e"); break;
-                                case 28:  printf(" File Separator		^\\	  "); break;
-                                case 29:  printf(" Record Separator		^]	  "); break;
-                                case 30:  printf(" Group Separator		^^	  "); break;
-                                case 31:  printf(" Unit Separator		^_	  "); break;
-                                case 127: printf(" Delete			^?	  "); break;
-                        }
-                }
                 uint8_t utf8_buffer[5];
                 int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
                 utf8_buffer[utf8_byte_count] = 0;
-                bool write_output = (codepoint != '\n');
-                if (write_output) {
+                int wcwidth_value = wcwidth_musl(codepoint);
+                if (wcwidth_value != -1) {
                         printf(" = '%s'", utf8_buffer);
+                }
+                if (codepoint <= 127 && program.output_format == output_format_t::DESCRIPTION_DECODING) {
+                        switch (codepoint) {
+                                case 0:   printf(" (Null character ^@ \\0)"); break;
+                                case 1:   printf(" (Start of Header ^A)"); break;
+                                case 2:   printf(" (Start of Text ^B)"); break;
+                                case 3:   printf(" (End of Text	^C)"); break;
+                                case 4:   printf(" (End of Transmission	^D)"); break;
+                                case 5:   printf(" (Enquiry ^E)"); break;
+                                case 6:   printf(" (Acknowledgement ^F)"); break;
+                                case 7:   printf(" (Bell ^G)"); break;
+                                case 8:   printf(" (Backspace ^H \\b)"); break;
+                                case 9:   printf(" (Horizontal tab ^I \\t)"); break;
+                                case 10:  printf(" (Line feed (^J, \\n)"); break;
+                                case 11:  printf(" (Vertical tab ^K \\v)"); break;
+                                case 12:  printf(" (Form feed ^L \\f)"); break;
+                                case 13:  printf(" (Carriage return (^M, \\r)"); break;
+                                case 14:  printf(" (Start of Text ^N)"); break;
+                                case 15:  printf(" (Shift In ^O	)"); break;
+                                case 16:  printf(" (Shift Out ^P )"); break;
+                                case 17:  printf(" (Device Control 1 ^Q)"); break;
+                                case 18:  printf(" (Device Control 2 ^R)"); break;
+                                case 19:  printf(" (Device Control 3 ^S)"); break;
+                                case 20:  printf(" (Device Control 4 ^T)"); break;
+                                case 21:  printf(" (Negative Acknowledgement ^U)"); break;
+                                case 22:  printf(" (Synchronous idle ^V)"); break;
+                                case 23:  printf(" (End of Transmission Block ^W)"); break;
+                                case 24:  printf(" (Cancel ^X)"); break;
+                                case 25:  printf(" (End of Medium ^Y)"); break;
+                                case 26:  printf(" (Substitute ^Z)"); break;
+                                case 27:  printf(" (Escape ^[ \\e)"); break;
+                                case 28:  printf(" (File Separator ^\\)"); break;
+                                case 29:  printf(" (Record Separator ^])"); break;
+                                case 30:  printf(" (Group Separator ^^)"); break;
+                                case 31:  printf(" (Unit Separator ^_)"); break;
+                                case 127: printf(" (Delete ^?)"); break;
+                        }
                 }
                 if (program.output_format == output_format_t::DESCRIPTION_DECODING) {
                         char const* plane_name = "???";
@@ -225,7 +238,6 @@ void encode_codepoint(uint32_t codepoint, program_options_t& program) {
                         }
 
                         char const* block_name = get_block_name(codepoint);
-                        int wcwidth_value = wcwidth_musl(codepoint);
                         printf(" from the block %s in plane %s. wcwidth=%d\n", block_name, plane_name, wcwidth_value);
                 } else {
                         printf("\n");
@@ -278,22 +290,11 @@ void process_utf8_byte(uint8_t byte, uint8_t* utf8_buffer, uint8_t& utf8_pos, ui
         if (byte <= 127) {
                 invalid_utf8_seq = (remaining_utf8_continuation_bytes > 0);
                 if (invalid_utf8_seq) {
-                        options.note_error("expected continuation byte but received byte 0x%0X", (unsigned int) byte);
+                        options.note_error(byte, "expected continuation byte");
                 } else {
-                        if (options.print_byte_input()) {
-                                printf("0x%02X - ", (int) byte);
-                                printf("single-byte UTF-8 sequence: ");
-                        }
+                        options.print_byte_result(byte, "single-byte UTF-8 sequence: ");
                         encode_codepoint(byte, options);
                 }
-                /*
-        } else if (byte == 0b11000000 || byte == 0b11000001) {
-                options.note_error("UTF-8 invalid byte (would lead to overlong encoding of 0-127 range)");
-                invalid_utf8_seq = true;
-        } else if (byte >= 245) {
-                options.note_error("UTF-8 invalid byte (if used as a starting byte would lead to value > 0x10FFFF)");
-                invalid_utf8_seq = true;
-                */
         } else if ((byte & /*0b11000000=*/0xc0) == /*0b10000000=*/0x80) {
                 invalid_utf8_seq = (remaining_utf8_continuation_bytes == 0);
                 if (!invalid_utf8_seq) {
@@ -305,22 +306,18 @@ void process_utf8_byte(uint8_t byte, uint8_t* utf8_buffer, uint8_t& utf8_pos, ui
                                 utf8_buffer[used_length] = 0;
                                 uint32_t code_point = utf8_sequence_to_codepoint(utf8_buffer, used_length);
                                 if (code_point > 0x10FFFF) {
-                                        options.note_error("code point out of range: %u", code_point);
+                                        options.note_error(byte, "code point out of range: %u", code_point);
                                 } else if (((code_point <= 0x80) && used_length > 1)
                                                 || (code_point < 0x800 && used_length > 2)
                                                 || (code_point < 0x10000 && used_length > 3)) {
-                                        options.note_error("overlong encoding of %u using %d bytes", code_point, used_length);
+                                        options.note_error(byte, "overlong encoding of %u using %d bytes", code_point, used_length);
                                 } else {
-                                        if (options.print_byte_input()) {
-                                                printf("0x%02X - ", (int) byte);
-                                                printf("UTF-8 continuation byte 0b10xxxxxx: ");
-                                        }
+                                        options.print_byte_result(byte, "UTF-8 continuation byte 0b10xxxxxx: ");
                                         encode_codepoint(code_point, options);
                                 }
                                 remaining_utf8_continuation_bytes = 0;
-                        } else if (options.print_byte_input()) {
-                                printf("0x%02X - ", (int) byte);
-                                printf("UTF-8 continuation byte 0b10xxxxxx\n");
+                        } else {
+                                options.print_byte_result(byte, "UTF-8 continuation byte 0b10xxxxxx\n");
                         }
                 }
         } else {
@@ -334,16 +331,15 @@ void process_utf8_byte(uint8_t byte, uint8_t* utf8_buffer, uint8_t& utf8_pos, ui
                 } else {
                         expect_following = -1;
                         invalid_utf8_seq = true;
-                        options.note_error("invalid UTF-8 byte 0x%0X", byte);
+                        options.note_error(byte, "invalid UTF-8 byte");
                 }
                 if (expect_following != -1) {
                         if (remaining_utf8_continuation_bytes == 0) {
-                                if (options.print_byte_input()) {
-                                        printf("leading %s byte for a %d byte sequence\n",
-                                                        (expect_following == 1) ? "0b110xxxxx" :
-                                                        ((expect_following == 2) ? "0b1110xxxx" : "0b11110xxx"),
-                                                        expect_following + 1);
-                                }
+                                options.print_byte_result(byte,
+                                                "leading %s byte for a %d byte sequence\n",
+                                                (expect_following == 1) ? "0b110xxxxx" :
+                                                ((expect_following == 2) ? "0b1110xxxx" : "0b11110xxx"),
+                                                expect_following + 1);
                                 remaining_utf8_continuation_bytes = expect_following;
                                 utf8_pos = 1;
                                 utf8_buffer[0] = byte;
@@ -367,12 +363,12 @@ void process_utf16_byte(uint8_t byte, uint8_t* state_buffer, uint8_t& state_pos,
                         ? state_buffer[0] + (uint16_t(state_buffer[1]) << 8)
                         : state_buffer[1] + (uint16_t(state_buffer[0]) << 8);
                 if (codeuint >= 0xD800 && codeuint <= 0xDBFF) {
-                        // leading surrogate
+                        options.print_byte_result(byte, "leading surrogate %d\n", codeuint);
                 } else if (codeuint >= 0xDC00 && codeuint <= 0xDFFF) {
-                        // trailing surrogate
-                        options.note_error("trailing surrogate %d without leading surrogate before", codeuint);
+                        options.note_error(byte, "trailing surrogate %d without leading surrogate before", codeuint);
                         state_pos = 0;
                 } else {
+                        options.print_byte_result(byte, "single UTF-16 code unit: ");
                         encode_codepoint(codeuint, options);
                         state_pos = 0;
                 }
@@ -384,8 +380,11 @@ void process_utf16_byte(uint8_t byte, uint8_t* state_buffer, uint8_t& state_pos,
                         ? state_buffer[2] + (uint16_t(state_buffer[3]) << 8)
                         : state_buffer[3] + (uint16_t(state_buffer[2]) << 8);
                 uint32_t codepoint = 0x010000 + (uint32_t(leading_surrogate - 0xD800) << 10) + (trailing_surrogate - 0xDC00);
+                options.print_byte_result(byte, "trailling surrogate %d", trailing_surrogate);
                 encode_codepoint(codepoint, options);
                 state_pos = 0;
+        } else {
+                options.print_byte_result(byte, "start of UTF-16 code unit\n");
         }
 }
 
@@ -397,13 +396,16 @@ void process_utf32_byte(uint8_t byte, uint8_t* state_buffer, uint8_t& state_pos,
                         int shift = 8 * ((options.input_format == input_format_t::UTF32LE) ? i : (3 - i));
                         codepoint += (state_buffer[i] << shift) & (0xFF << shift);
                 }
+                options.print_byte_result(byte, "byte 4 of a UTF-32 code unit: ");
                 encode_codepoint(codepoint, options);
                 state_pos = 0;
+        } else {
+                options.print_byte_result(byte, "byte %d of a UTF-32 code unit\n", state_pos);
         }
 }
 
 void process_textual_codepoint_byte(uint8_t byte, uint8_t* state_buffer, uint8_t& state_buffer_pos, program_options_t& options) {
-        if (isspace(byte)) {
+        if (byte == '\n' || byte == ' ' || byte == '\r' || byte == '\t') {
                 if (state_buffer_pos > 0) {
                         if (state_buffer_pos > 2 && state_buffer[0] == 'U' && state_buffer[1] == '+') {
                                 // Handle "U+XXXX" as "0xXXXX"
@@ -413,18 +415,15 @@ void process_textual_codepoint_byte(uint8_t byte, uint8_t* state_buffer, uint8_t
                         state_buffer[state_buffer_pos] = 0;
                         long codepoint = strtol((char*)state_buffer, NULL, 0);
                         if (codepoint == 0) {
-                                options.note_error("cannot parse into code point: '%s'", state_buffer);
+                                options.note_error(byte, "cannot parse into code point: '%s'", state_buffer);
                         } else {
                                 encode_codepoint(codepoint, options);
                         }
                         state_buffer_pos = 0;
-                } else {
-                        // Ignore
-                        return;
                 }
         } else if (state_buffer_pos >= 16) {
                 state_buffer[state_buffer_pos] = 0;
-                options.note_error("too large string '%s' - discarding", state_buffer);
+                options.note_error(byte, "too large string '%s' - discarding", state_buffer);
         } else {
                 state_buffer[state_buffer_pos++] = byte;
         }
@@ -562,13 +561,13 @@ int main(int argc, char** argv) {
                         case 'd':
                                 if (strcmp(optarg, "utf8") == 0) {
                                         options.input_format = input_format_t::UTF8;
-                                } else if (strcmp(optarg, "utf16le") == 0) {
+                                } else if (strcmp(optarg, "utf16le") == 0 || strcmp(optarg, "utf16-le") == 0) {
                                         options.input_format = input_format_t::UTF16LE;
-                                } else if (strcmp(optarg, "utf16be") == 0) {
+                                } else if (strcmp(optarg, "utf16be") == 0 || strcmp(optarg, "utf16-be") == 0) {
                                         options.input_format = input_format_t::UTF16BE;
-                                } else if (strcmp(optarg, "utf32le") == 0) {
+                                } else if (strcmp(optarg, "utf32le") == 0 || strcmp(optarg, "utf32-le") == 0) {
                                         options.input_format = input_format_t::UTF32LE;
-                                } else if (strcmp(optarg, "utf32be") == 0) {
+                                } else if (strcmp(optarg, "utf32be") == 0 || strcmp(optarg, "utf32-be") == 0) {
                                         options.input_format = input_format_t::UTF32BE;
                                 } else if (strcmp(optarg, "codepoint") == 0) {
                                         options.input_format = input_format_t::TEXTUAL_CODEPOINT;
@@ -584,13 +583,13 @@ int main(int argc, char** argv) {
                                         options.output_format = output_format_t::DESCRIPTION_DECODING;
                                 } else if (strcmp(optarg, "utf8") == 0) {
                                         options.output_format = output_format_t::UTF8;
-                                } else if (strcmp(optarg, "utf16le") == 0) {
+                                } else if (strcmp(optarg, "utf16le") == 0 || strcmp(optarg, "utf16-le") == 0) {
                                         options.output_format = output_format_t::UTF16LE;
-                                } else if (strcmp(optarg, "utf16be") == 0) {
+                                } else if (strcmp(optarg, "utf16be") == 0 || strcmp(optarg, "utf16-be") == 0) {
                                         options.output_format = output_format_t::UTF16BE;
-                                } else if (strcmp(optarg, "utf32le") == 0) {
+                                } else if (strcmp(optarg, "utf32le") == 0 || strcmp(optarg, "utf32-le") == 0) {
                                         options.output_format = output_format_t::UTF32LE;
-                                } else if (strcmp(optarg, "utf32be") == 0) {
+                                } else if (strcmp(optarg, "utf32be") == 0 || strcmp(optarg, "utf32-be") == 0) {
                                         options.output_format = output_format_t::UTF32BE;
                                 } else if (strcmp(optarg, "silent") == 0) {
                                         options.output_format = output_format_t::SILENT;
@@ -687,8 +686,9 @@ int main(int argc, char** argv) {
         if (options.print_summary) {
                 char const* color_prefix = options.terminal_color_output ? "\x1B[35m" : "";
                 char const* color_suffix = options.terminal_color_output ? "\x1B[m" : "";
+                uint64_t bytes_encountered = options.bytes_into_input - options.byte_skip_offset;
                 fprintf(stderr, "%sSummary: %" PRIu64 " code points decoded from %" PRIu64 " bytes with %" PRIu64 " errors%s\n",
-                                 color_prefix, options.codepoints_into_input, options.bytes_into_input, options.error_count, color_suffix);
+                                 color_prefix, options.codepoints_into_input, bytes_encountered, options.error_count, color_suffix);
         } else if (is_output_tty && options.output_format != output_format_t::DESCRIPTION_CODEPOINT  && options.output_format != output_format_t::DESCRIPTION_DECODING && options.output_format != output_format_t::SILENT) {
                 // Finish with newlines if writing raw output to terminal
                 printf("\n");
