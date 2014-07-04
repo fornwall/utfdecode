@@ -95,12 +95,17 @@ struct program_options_t {
                 exit(exit_status);
         }
 
-        void encode_utf16(uint32_t codepoint, uint8_t* buffer) {
+        void encode_utf16(uint16_t codeunit, uint8_t* buffer) {
                 bool little_endian = (output_format == output_format_t::UTF16LE);
-                buffer[0] = little_endian ? (codepoint & 0xFF) : (codepoint >> 8);
-                buffer[1] = little_endian ? (codepoint >> 8) : (codepoint & 0xFF);
+                buffer[0] = little_endian ? (codeunit & 0xFF) : (codeunit >> 8);
+                buffer[1] = little_endian ? (codeunit >> 8) : (codeunit & 0xFF);
                 buffer[2] = 0;
         }
+
+        void print_byte(int byte) {
+                if (print_byte_input()) printf("0x%02X - ", (int) byte);
+        }
+
 };
 
 /* Assumes that the buffer is already validated. Does not handle overlong encodings. */
@@ -233,6 +238,7 @@ void encode_codepoint(uint32_t codepoint, program_options_t& program) {
                 fflush(stdout);
         } else if (program.output_format == output_format_t::UTF16BE || program.output_format == output_format_t::UTF16LE) {
                 uint8_t output[5];
+                int output_length = 2;
                 if (codepoint <= 0xFFFF) {
                         program.encode_utf16(codepoint, output);
                 } else {
@@ -244,23 +250,23 @@ void encode_codepoint(uint32_t codepoint, program_options_t& program) {
                         // (3) The low ten bits (also in the range 0..0x03FF) are added to 0xDC00 to give the second code unit
                         // or trail surrogate, which will be in the range 0xDC00..0xDFFF.
                         codepoint -= 0x010000;
-                        uint16_t first = (0b11111111110000000000 & codepoint) + 0xD800;
-                        uint16_t second = (0b00000000001111111111 & codepoint) + 0xDC00;
+                        uint16_t first = (codepoint >> 10) + 0xD800;
+                        uint16_t second = (0b1111111111 & codepoint) + 0xDC00;
                         program.encode_utf16(first, output);
                         program.encode_utf16(second, output + 2);
+                        output_length = 4;
                 }
-                printf("%s", output);
+                write(STDOUT_FILENO, output, output_length);
                 fflush(stdout);
         } else if (program.output_format == output_format_t::UTF32BE || program.output_format == output_format_t::UTF32LE) {
                 uint8_t buffer[5];
                 bool little_endian = program.output_format == output_format_t::UTF32LE;
                 for (int i = 0; i < 4; i++) {
-                        int shift = little_endian ? i : (3 -i);
-                        buffer[i] = 0b11111111 & (codepoint >> shift);
+                        int shift = 8 * (little_endian ? i : (3 - i));
+                        buffer[i] = (codepoint >> shift) & 0xFF;
                 }
-                printf("%s", buffer);
+                write(STDOUT_FILENO, buffer, 4);
                 fflush(stdout);
-                for (int i = 0; i < 4; i++) buffer[i] = 0b11111111 & (codepoint >> (3-i));
         }
 }
 
@@ -365,6 +371,7 @@ void process_utf16_byte(uint8_t byte, uint8_t* state_buffer, uint8_t& state_pos,
                 } else if (codeuint >= 0xDC00 && codeuint <= 0xDFFF) {
                         // trailing surrogate
                         options.note_error("trailing surrogate %d without leading surrogate before", codeuint);
+                        state_pos = 0;
                 } else {
                         encode_codepoint(codeuint, options);
                         state_pos = 0;
@@ -376,8 +383,9 @@ void process_utf16_byte(uint8_t byte, uint8_t* state_buffer, uint8_t& state_pos,
                 uint16_t trailing_surrogate = (options.input_format == input_format_t::UTF16LE)
                         ? state_buffer[2] + (uint16_t(state_buffer[3]) << 8)
                         : state_buffer[3] + (uint16_t(state_buffer[2]) << 8);
-                uint32_t codepoint = (leading_surrogate - 0xD800) + (trailing_surrogate - 0xDC00);
+                uint32_t codepoint = 0x010000 + (uint32_t(leading_surrogate - 0xD800) << 10) + (trailing_surrogate - 0xDC00);
                 encode_codepoint(codepoint, options);
+                state_pos = 0;
         }
 }
 
@@ -386,8 +394,8 @@ void process_utf32_byte(uint8_t byte, uint8_t* state_buffer, uint8_t& state_pos,
         if (state_pos == 4) {
                 uint32_t codepoint = 0;
                 for (int i = 0; i < 4; i++) {
-                        int shift = (options.input_format == input_format_t::UTF32BE) ? i : (3-i);
-                        codepoint += (state_buffer[i] >> shift);
+                        int shift = 8 * ((options.input_format == input_format_t::UTF32LE) ? i : (3 - i));
+                        codepoint += (state_buffer[i] << shift) & (0xFF << shift);
                 }
                 encode_codepoint(codepoint, options);
                 state_pos = 0;
@@ -479,6 +487,7 @@ void read_and_echo(program_options_t& options) {
                                 case input_format_t::UTF16BE:
                                 case input_format_t::UTF16LE:
                                         process_utf16_byte(c, state_buffer, state_buffer_position, options);
+                                        break;
                                 case input_format_t::UTF32BE:
                                 case input_format_t::UTF32LE:
                                         process_utf32_byte(c, state_buffer, state_buffer_position, options);
@@ -504,10 +513,10 @@ void print_usage_and_exit(char const* program_name, int exit_status) {
                         "  -d, --decode-format FORMAT     Determine how input should be decoded:\n"
                         "                                     * codepoint - decode input as textual U+XXXX descriptions\n"
                         "                                     * utf8 (default) - decode input as UTF-8\n"
-                        "                                     * utf16le (default) - decode input as UTF-8\n"
-                        "                                     * utf16be (default) - decode input as UTF-8\n"
-                        "                                     * utf32le (default) - decode input as UTF-8\n"
-                        "                                     * utf32be (default) - decode input as UTF-8\n"
+                        "                                     * utf16le - decode input as UTF-8\n"
+                        "                                     * utf16be - decode input as UTF-8\n"
+                        "                                     * utf32le - decode input as UTF-8\n"
+                        "                                     * utf32be - decode input as UTF-8\n"
                         "  -e, --encode-format FORMAT      Determine how output should encoded. Accepts same as the above decoding formats and adds:\n"
                         "                                     * decoding (default) - debug output of the complete decoding process\n"
                         "                                     * silent - no output\n"
