@@ -58,45 +58,45 @@ There was an input/output error.
 
 .Sh EXAMPLES
 
-To see the terminal input on key presses, writing a newline between reads/key presses:
+See the terminal input on key presses, writing a newline between reads/key presses:
 .Pp
 .Dl $ utfdecode -n
 .Pp
 
-To check a file for UTF-8 encoding errors, listing all the errors:
+Check a file for UTF-8 encoding errors, listing all the errors:
 .Pp
 .Dl $ utfdecode -e silent myfile
 .Pp
 
-To debug the UTF-8 encoding looking at the first 100 bytes at an offset of 1024:
+Debug the UTF-8 encoding looking at the first 100 bytes at an offset of 1024:
 .Pp
 .Dl $ utfdecode -o 1024 -l 100 myfile
 .Pp
 
-To see a summary of how many bytes, unicode characters and encoding errors there
+See a summary of how many bytes, unicode characters and encoding errors there
 is at the start page of english Wikipedia:
 .Pp
 .Dl $ curl -s http://en.wikipedia.org/wiki/Main_Page | utfdecode -e silent -s
 .Pp
 
-To validate a file in shell script without output:
+Validate a file in shell script without output:
 .Pp
 .Dl $ if utfdecide -e silent -q myfile; then process_file; else handle_error; fi
 .Pp
 
-To convert a file from UTF-16BE to UTF-8:
+Convert a file from UTF-16BE to UTF-8:
 .Pp
 .Dl $ utfdecode -d utf16be -e utf8 silent myfile
 .Pp
 
-To see how the unicode character
+See how the unicode character
 .Sq U+8278
 looks when written to the terminal in UTF-8:
 .Pp
 .Dl $ echo U+8278 | utfdecode -d codepoint -e codepoint
 .Pp
 
-To see how many bytes a file would be in different encodings:
+Compare how many bytes a file would be in different encodings:
 .Pp
 .Dl $ for e in utf8 utf16be utf32be; do echo "$e:"; utdecode -e utf8 myfile | wc -c; done
 .Pp
