@@ -385,19 +385,21 @@ void read_and_echo(program_options_t& options) {
 void print_usage_and_exit(char const* program_name) {
         fprintf(stderr, "usage: %s [OPTIONS]\n"
                         "  -d, --decode-format FORMAT     Determine how input should be decoded:\n"
+                        "                                     * codepoint - decode input as textual U+XXXX descriptions\n"
                         "                                     * utf8 (default) - decode input as UTF-8\n"
-                        "                                     * textual - decode input as textual U+XXXX descriptions\n"
                         "  -e, --encode-format FORMAT      Determine what output should be written:\n"
+                        "                                     * codepoint - output code points in textual U+XXXX format\n"
                         "                                     * decoding (default) - debug output of the complete decoding process\n"
-                        "                                     * codepoint - resulting code points in a U+XXXX format\n"
                         "                                     * silent - no output\n"
+                        "                                     * utf8 - encode output as UTF-8\n"
                         "  -h, --help                     Show this help and exit\n"
-                        "  -o, --offset OFFSET            Skip the specified amount of bytes before starting decoding\n"
+                        "  -l, --limit LIMIT              Only decode up to the specified amount of bytes\n"
                         "  -m, --malformed-handling       Determine what should happen on decoding error:\n"
                         "                                     * ignore - ignore invalid input\n"
                         "                                     * replace (default) - replace with the unicode replacement character � (U+FFFD)\n"
                         "                                     * abort - abort the program directly with exit value 65\n"
                         "  -n, --newlines-after-reads     Write out newlines after each read call\n"
+                        "  -o, --offset OFFSET            Skip the specified amount of bytes before starting decoding\n"
                         "  -q, --quiet-errors             Do not log decoding errors to stderr\n"
                         "  -s, --summary                  Show a summary at end of input\n"
                         "  -t, --timestamps               Show a timestamp after each input read\n"
@@ -416,7 +418,7 @@ int main(int argc, char** argv) {
                 {"newlines-after-reads", no_argument, nullptr, 'n'},
                 {"offset", required_argument, nullptr, 'o'},
                 {"quiet-errors", no_argument, nullptr, 'q'},
-                {"summary", required_argument, nullptr, 's'},
+                {"summary", no_argument, nullptr, 's'},
                 {"timestamps", no_argument, nullptr, 't'},
                 {0, 0, 0, 0}
         };
@@ -430,7 +432,7 @@ int main(int argc, char** argv) {
                         case 'd':
                                 if (strcmp(optarg, "utf8") == 0) {
                                         options.input_format = input_format_t::UTF8;
-                                } else if (strcmp(optarg, "textual") == 0) {
+                                } else if (strcmp(optarg, "codepoint") == 0) {
                                         options.input_format = input_format_t::TEXTUAL_CODEPOINT;
                                 } else {
                                         fprintf(stderr, "'%s' is not a valid decode format\n", optarg);
