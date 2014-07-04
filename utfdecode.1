@@ -35,6 +35,15 @@ Encode in the specified encoding.
 Determine how input should be decoded. The format can be 'utf8' (default) to decode UTF-8
 and 'codepoint' for decoding textual U+XXXX code points.
 
+.It Fl l Ar limit , Fl Fl limit Ns = Ns Ar limit
+Limit the decoding to the specified number of bytes.
+
+.It Fl o Ar offset , Fl Fl offset Ns = Ns Ar offset
+Skip the specified number of bytes before starting decoding.
+
+.It Fl s , Fl Fl summary
+Print a summary at end of the decoding showing number of bytes, characters and decoding errors.
+
 .It Fl q , Fl Fl quiet-errors
 Do not log errors to stderr.
 
