@@ -5,5 +5,6 @@
 rm -Rf build
 mkdir build
 cd build
-../configure
+../configure --prefix=$HOME/lib/prefix
 make dist
+make install

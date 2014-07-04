@@ -1,23 +1,66 @@
-.TH UTFDECODE 1
-.SH NAME
-utfdecode \- decode UTF-8, UTF-16 or UTF-32 input for debugging and transcoding
-.SH SYNOPSIS
-.B utfdecode [OPTIONS]
-.SH DESCRIPTION
-.B utfdecode
-takes input from stdin, decodes it and outputs to stdout
+.Dd July 3 2014
+.Dt UTFDECODE 1
 
-.SH OPTIONS
+.Sh NAME
+.Nm utfdecode
+.Nd unicode decoder, encoder and debugger
 
-.TP
-.BR \-d, --decode-format FORMAT
-Determine how input should be decoded.
-* utf8 (default) - decode input as UTF-8
-* textual - decode input as textual U+XXXX descriptions
+.Sh SYNOPSIS
+.Nm utfdecode
+.Bk -words
+.Op Fl dehlmnoqst
+.Op Fl e Ar format
+.Op Fl d Ar format
 
-.TP
-.BR \-s, --summary
-print a summary when done
+.Ek
 
-.SH AUTHOR
+.Sh DESCRIPTION
+The
+.Nm utfdecode
+utility input from stdin, decodes it and encodes to stdout. blah blah blah
+
+.Pp
+.Nm utfdecode
+can be used to debug valid and invalid UTF-encoded content.
+
+.Pp
+The following options are available:
+
+.Bl -tag -width indent
+
+.It Fl e Ar format , Fl Fl encode-format Ns = Ns Ar format
+Encode in the specified encoding.
+
+.It Fl d Ar format , Fl Fl decode-format Ns = Ns Ar format
+Determine how input should be decoded. The format can be 'utf8' (default) to decode UTF-8
+and 'codepoint' for decoding textual U+XXXX code points.
+
+.It Fl q , Fl Fl quiet-errors
+Do not log errors to stderr.
+
+.Sh EXIT STATUS
+The
+.Nm utfdecode
+utility exits with one of the following values:
+.Pp
+.Bl -tag -width flag -compact
+.It Li 0
+There was no decoding error.
+.It Li 64
+There was invalid command line usage.
+.It Li 65
+There was at least one decoding error.
+.It Li 66
+The specified input file could not be opened.
+.It Li 74
+There was an input/output error.
+.El
+
+.Sh EXAMPLES
+To decode..
+
+.Sh SEE ALSO
+.Xr iconv 1
+
+.Sh AUTHOR
 Fredrik Fornwall <fredrik@fornwall.net>
