@@ -1,6 +1,8 @@
 #define __STDC_FORMAT_MACROS
+#define _XOPEN_SOURCE
 
 #include <fcntl.h>
+#include "musl/wcwidth_musl.h"
 #include <getopt.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -10,6 +12,9 @@
 #include <sys/time.h>
 #include <termios.h>
 #include <unistd.h>
+#include <wchar.h>
+#include <locale.h>
+#include "unicode_blocks.hpp"
 
 /* From sysexits.h: */
 #define EX_OK           0       /* successful termination */
@@ -58,7 +63,7 @@ struct program_options_t {
         uint64_t codepoints_into_input{0};
         uint64_t error_count{0};
 
-        bool print_byte_input() const { return output_format == output_format_t::DESCRIPTION_DECODING; };
+        bool print_byte_input() const { return output_format == output_format_t::DESCRIPTION_DECODING && input_format != input_format_t::TEXTUAL_CODEPOINT; };
         bool is_silent_output() const { return output_format == output_format_t::SILENT; };
         // bool is_report_errors() const { return error_reporting == error_reporting_t::REPORT_STDERR; }
         //void check_exit_on_error() { if (error_handling == error_handling_t::ABORT) exit(EX_DATAERR); }
@@ -137,7 +142,7 @@ void describe_codepoint(uint32_t codepoint, program_options_t& program) {
 
         if (program.output_format == output_format_t::DESCRIPTION_DECODING || program.output_format == output_format_t::DESCRIPTION_CODEPOINT) {
                 printf("U+%04X", codepoint);
-                if (codepoint <= 127 ) {
+                if (codepoint <= 127 && program.output_format == output_format_t::DESCRIPTION_DECODING) {
                         switch (codepoint) {
                                 case 0:   printf(" Null character		^@	\\0"); break;
                                 case 1:   printf(" Start of Header		^A	 "); break;
@@ -181,26 +186,32 @@ void describe_codepoint(uint32_t codepoint, program_options_t& program) {
                 if (write_output) {
                         printf(" = '%s'", utf8_buffer);
                 }
-                char const* plane_name = "???";
-                if (codepoint <= 0xFFFF) {
-                        plane_name = "0 Basic Multilingual Plane (BMP)";
-                } else if (codepoint <= 0x1FFFF) {
-                        plane_name = "1 Supplementary Multilingual Plane (SMP)";
-                } else if (codepoint < 0x2FFFF) {
-                        plane_name = "2 Supplementary Ideographic Plane (SIP)";
-                } else if (codepoint <= 0xDFFFF) {
-                        plane_name = "*Unassigned*";
-                } else if (codepoint <= 0xEFFFF) {
-                        plane_name = "14 Supplement­ary Special-purpose Plane (SSP)";
-                } else if (codepoint <= 0xFFFFD) {
-                        plane_name = "15 Supplemental Private Use Area-A (S PUA A)";
-                } else if (codepoint <= 0x10FFFD) {
-                        plane_name = "16 Supplemental Private Use Area-B (S PUA B)";
-                } else {
-                        die_with_internal_error("plane out of range");
-                }
+                if (program.output_format == output_format_t::DESCRIPTION_DECODING) {
+                        char const* plane_name = "???";
+                        if (codepoint <= 0xFFFF) {
+                                plane_name = "0 Basic Multilingual Plane (BMP)";
+                        } else if (codepoint <= 0x1FFFF) {
+                                plane_name = "1 Supplementary Multilingual Plane (SMP)";
+                        } else if (codepoint < 0x2FFFF) {
+                                plane_name = "2 Supplementary Ideographic Plane (SIP)";
+                        } else if (codepoint <= 0xDFFFF) {
+                                plane_name = "*Unassigned*";
+                        } else if (codepoint <= 0xEFFFF) {
+                                plane_name = "14 Supplement­ary Special-purpose Plane (SSP)";
+                        } else if (codepoint <= 0xFFFFD) {
+                                plane_name = "15 Supplemental Private Use Area-A (S PUA A)";
+                        } else if (codepoint <= 0x10FFFD) {
+                                plane_name = "16 Supplemental Private Use Area-B (S PUA B)";
+                        } else {
+                                die_with_internal_error("plane out of range");
+                        }
 
-                printf("    Plane:%s\n", plane_name);
+                        char const* block_name = get_block_name(codepoint);
+                        int wcwidth_value = wcwidth_musl(codepoint);
+                        printf(" from the block %s in plane %s. wcwidth=%d\n", block_name, plane_name, wcwidth_value);
+                } else {
+                        printf("\n");
+                }
         } else if (program.output_format == output_format_t::UTF8) {
                 uint8_t utf8_buffer[5];
                 int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
@@ -220,13 +231,25 @@ void describe_codepoint(uint32_t codepoint, program_options_t& program) {
         }
 }
 
-void describe_byte(uint8_t byte, uint8_t* utf8_buffer, uint8_t* utf8_pos, uint8_t* remaining_utf8_continuation_bytes, program_options_t& options) {
+struct decoder {
+        void consume_byte(uint8_t byte);
+};
+
+struct decoder_utf16 {
+        decoder_utf16(bool little_endian_) : little_endian(little_endian_) {}
+        bool little_endian;
+};
+
+void process_utf8_byte(uint8_t byte, uint8_t* utf8_buffer, uint8_t& utf8_pos, uint8_t& remaining_utf8_continuation_bytes, program_options_t& options) {
         bool invalid_utf8_seq = false; 
+        if (options.input_format == input_format_t::UTF16LE) {
+                return;
+        }
         if (byte <= 127) {
-                invalid_utf8_seq = (*remaining_utf8_continuation_bytes > 0);
+                invalid_utf8_seq = (remaining_utf8_continuation_bytes > 0);
                 if (invalid_utf8_seq) {
                         char msg[256];
-                        snprintf(msg, sizeof(msg), "expected %d UTF-8 continuation bytes, received byte 0x%0X", *remaining_utf8_continuation_bytes, (unsigned int)byte);
+                        snprintf(msg, sizeof(msg), "expected %d UTF-8 continuation bytes, received byte 0x%0X", remaining_utf8_continuation_bytes, (unsigned int)byte);
                         options.note_error(msg);
                 } else {
                         if (options.print_byte_input()) {
@@ -244,12 +267,12 @@ void describe_byte(uint8_t byte, uint8_t* utf8_buffer, uint8_t* utf8_pos, uint8_
                 invalid_utf8_seq = true;
                 */
         } else if ((byte & /*0b11000000=*/0xc0) == /*0b10000000=*/0x80) {
-                invalid_utf8_seq = (*remaining_utf8_continuation_bytes == 0);
+                invalid_utf8_seq = (remaining_utf8_continuation_bytes == 0);
                 if (!invalid_utf8_seq) {
-                        utf8_buffer[(*utf8_pos)++] = byte;
-                        --*remaining_utf8_continuation_bytes;
-                        if (*remaining_utf8_continuation_bytes == 0) {
-                                uint8_t used_length = *utf8_pos;
+                        utf8_buffer[utf8_pos++] = byte;
+                        --remaining_utf8_continuation_bytes;
+                        if (remaining_utf8_continuation_bytes == 0) {
+                                uint8_t used_length = utf8_pos;
 
                                 utf8_buffer[used_length] = 0;
                                 uint32_t code_point = utf8_sequence_to_codepoint(utf8_buffer, used_length);
@@ -270,7 +293,7 @@ void describe_byte(uint8_t byte, uint8_t* utf8_buffer, uint8_t* utf8_pos, uint8_
                                         }
                                         describe_codepoint(code_point, options);
                                 }
-                                *remaining_utf8_continuation_bytes = 0;
+                                remaining_utf8_continuation_bytes = 0;
                         } else if (options.print_byte_input()) {
                                 printf("0x%02X - ", (int) byte);
                                 printf("UTF-8 continuation byte 0b10xxxxxx\n");
@@ -293,15 +316,15 @@ void describe_byte(uint8_t byte, uint8_t* utf8_buffer, uint8_t* utf8_pos, uint8_
                         options.note_error(msg);
                 }
                 if (expect_following != -1) {
-                        if (*remaining_utf8_continuation_bytes == 0) {
+                        if (remaining_utf8_continuation_bytes == 0) {
                                 if (options.print_byte_input()) {
                                         printf("UTF-8 leading byte      %s for a %d byte sequence\n",
                                                         (expect_following == 1) ? "0b110xxxxx" :
                                                         ((expect_following == 2) ? "0b1110xxxx" : "0b11110xxx"),
                                                         expect_following + 1);
                                 }
-                                *remaining_utf8_continuation_bytes = expect_following;
-                                *utf8_pos = 1;
+                                remaining_utf8_continuation_bytes = expect_following;
+                                utf8_pos = 1;
                                 utf8_buffer[0] = byte;
                         } else {
                                 invalid_utf8_seq = true;
@@ -312,14 +335,29 @@ void describe_byte(uint8_t byte, uint8_t* utf8_buffer, uint8_t* utf8_pos, uint8_
         // FIXME: https://github.com/jackpal/Android-Terminal-Emulator/commit/7335c643f758ce4351ac00813027ce1505f8dbd4
         // - should continue with the current byte in the buffer
         if (invalid_utf8_seq) {
-                *remaining_utf8_continuation_bytes = 0;
+                remaining_utf8_continuation_bytes = 0;
+        }
+}
+
+void process_utf16_byte(uint8_t byte, uint8_t* utf8_buffer, uint8_t& utf8_pos, uint8_t& remaining_utf8_continuation_bytes, program_options_t& options) {
+}
+
+void process_utf32_byte(uint8_t byte, uint8_t* state_buffer, uint8_t& utf8_pos, uint8_t& remaining_utf8_continuation_bytes, program_options_t& options) {
+        if (remaining_utf8_continuation_bytes == 1) {
+                uint32_t codepoint = 0;
+                for (int i = 0; i < 4; i++) {
+                        int shift = (options.input_format == input_format_t::UTF32BE) ? i : (3-i);
+                        codepoint += (state_buffer[i] >> shift);
+                }
+                describe_codepoint(codepoint, options);
+                remaining_utf8_continuation_bytes = 0;
         }
 }
 
 void read_and_echo(program_options_t& options) {
         uint8_t remaining_utf8_continuation_bytes = 0;
-        uint8_t utf8_pos = 0;
-        uint8_t utf8_buffer[5];
+        uint8_t state_buffer_position = 0;
+        uint8_t state_buffer[16];
 
         int64_t initial_timestamp = -1;
         if (options.timestamps) {
@@ -384,7 +422,20 @@ void read_and_echo(program_options_t& options) {
                                         end_of_input = true;
                                         break;
                                 } else {
-                                        describe_byte(c, utf8_buffer, &utf8_pos, &remaining_utf8_continuation_bytes, options);
+                                        switch (options.input_format) {
+                                                case input_format_t::UTF8:
+                                                        process_utf8_byte(c, state_buffer, state_buffer_position, remaining_utf8_continuation_bytes, options);
+                                                        break;
+                                                case input_format_t::UTF16BE:
+                                                case input_format_t::UTF16LE:
+                                                        process_utf16_byte(c, state_buffer, state_buffer_position, remaining_utf8_continuation_bytes, options);
+                                                case input_format_t::UTF32BE:
+                                                case input_format_t::UTF32LE:
+                                                        process_utf32_byte(c, state_buffer, state_buffer_position, remaining_utf8_continuation_bytes, options);
+                                                        break;
+                                                case input_format_t::TEXTUAL_CODEPOINT:
+                                                        break;
+                                        }
                                         options.bytes_into_input++;
                                         if (options.byte_skip_limit != 0 && ((options.byte_skip_limit + options.byte_skip_offset) <= options.bytes_into_input)) {
                                                 end_of_input = true;
@@ -423,6 +474,7 @@ void print_usage_and_exit(char const* program_name, int exit_status) {
 }
 
 int main(int argc, char** argv) {
+        setlocale(LC_ALL, NULL);
         program_options_t options;
         struct option getopt_options[] = {
                 {"decode-format", required_argument, nullptr, 'd'},
@@ -524,7 +576,7 @@ int main(int argc, char** argv) {
 
         if (optind + 1 == argc) {
                 int file_fd = open(argv[optind], O_RDONLY);
-                if (file_fd < -1) {
+                if (file_fd < 0) {
                         perror("open()");
                         return EX_NOINPUT;
                 }
