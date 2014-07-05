@@ -107,7 +107,7 @@ looks when written to the terminal in UTF-8:
 
 Compare how many bytes a file would be in different encodings:
 .Pp
-.Dl $ for e in utf8 utf16be utf32be; do echo "$e:"; utdecode -e utf8 myfile | wc -c; done
+.Dl $ for e in utf8 utf16be utf32be; do echo "$e:"; utfdecode -e $e myfile | wc -c; done
 .Pp
 
 .Sh SEE ALSO

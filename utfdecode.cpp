@@ -49,7 +49,7 @@ struct program_options_t {
         bool newlines_between_reads_for_description{false};
         bool timestamps{false};
         bool print_summary{false};
-        bool terminal_color_output{false};
+        bool output_is_terminal{false};
         bool input_is_terminal{false};
 
         struct termios vt_orig;
@@ -75,8 +75,8 @@ struct program_options_t {
                 error_count++;
                 if (error_reporting == error_reporting_t::REPORT_STDERR) {
                         fflush(stdout);
-                        char const* color_prefix = terminal_color_output ? "\x1B[31m" : "";
-                        char const* color_suffix = terminal_color_output ? "\x1B[m" : "";
+                        char const* color_prefix = output_is_terminal ? "\x1B[31m" : "";
+                        char const* color_suffix = output_is_terminal ? "\x1B[m" : "";
                         fprintf(stderr, "%s", color_prefix);
                         output_formatted_byte(stderr, byte);
                         fprintf(stderr, "malformed %" PRIu64 " %s and %" PRIu64 " %s in - ",
@@ -501,7 +501,11 @@ void read_and_echo(program_options_t& options) {
                                 break;
                         }
                 }
-                if (options.newlines_between_reads_for_description) printf("\n");
+                if (options.newlines_between_reads_for_description && !end_of_input && options.input_is_terminal
+                                  && (options.output_format == output_format_t::DESCRIPTION_CODEPOINT
+                                      || options.output_format == output_format_t::DESCRIPTION_DECODING)) {
+                        printf("\n");
+                }
                 fflush(stdout);
                 if (end_of_input) return;
         }
@@ -561,11 +565,13 @@ int main(int argc, char** argv) {
                         case 'd':
                                 if (strcmp(optarg, "utf8") == 0) {
                                         options.input_format = input_format_t::UTF8;
-                                } else if (strcmp(optarg, "utf16le") == 0 || strcmp(optarg, "utf16-le") == 0) {
+                                } else if (strcmp(optarg, "utf16le") == 0 || strcmp(optarg, "utf16-le")
+                                           || strcmp(optarg, "utf16") == 0 || strcmp(optarg, "utf-16") == 0) {
                                         options.input_format = input_format_t::UTF16LE;
                                 } else if (strcmp(optarg, "utf16be") == 0 || strcmp(optarg, "utf16-be") == 0) {
                                         options.input_format = input_format_t::UTF16BE;
-                                } else if (strcmp(optarg, "utf32le") == 0 || strcmp(optarg, "utf32-le") == 0) {
+                                } else if (strcmp(optarg, "utf32le") == 0 || strcmp(optarg, "utf32-le")
+                                           || strcmp(optarg, "utf32") == 0 || strcmp(optarg, "utf-32") == 0) {
                                         options.input_format = input_format_t::UTF32LE;
                                 } else if (strcmp(optarg, "utf32be") == 0 || strcmp(optarg, "utf32-be") == 0) {
                                         options.input_format = input_format_t::UTF32BE;
@@ -583,11 +589,13 @@ int main(int argc, char** argv) {
                                         options.output_format = output_format_t::DESCRIPTION_DECODING;
                                 } else if (strcmp(optarg, "utf8") == 0) {
                                         options.output_format = output_format_t::UTF8;
-                                } else if (strcmp(optarg, "utf16le") == 0 || strcmp(optarg, "utf16-le") == 0) {
+                                } else if (strcmp(optarg, "utf16le") == 0 || strcmp(optarg, "utf16-le")
+                                           || strcmp(optarg, "utf16") == 0 || strcmp(optarg, "utf-16") == 0) {
                                         options.output_format = output_format_t::UTF16LE;
                                 } else if (strcmp(optarg, "utf16be") == 0 || strcmp(optarg, "utf16-be") == 0) {
                                         options.output_format = output_format_t::UTF16BE;
-                                } else if (strcmp(optarg, "utf32le") == 0 || strcmp(optarg, "utf32-le") == 0) {
+                                } else if (strcmp(optarg, "utf32le") == 0 || strcmp(optarg, "utf32-le") == 0 
+                                           || strcmp(optarg, "utf32") == 0 || strcmp(optarg, "utf-32") == 0) {
                                         options.output_format = output_format_t::UTF32LE;
                                 } else if (strcmp(optarg, "utf32be") == 0 || strcmp(optarg, "utf32-be") == 0) {
                                         options.output_format = output_format_t::UTF32BE;
@@ -665,8 +673,7 @@ int main(int argc, char** argv) {
                 print_usage_and_exit(argv[0], EX_USAGE);
         }
 
-        bool is_output_tty = isatty(STDOUT_FILENO);
-        if (is_output_tty) options.terminal_color_output = true;
+        options.output_is_terminal = isatty(STDOUT_FILENO);
 
         // If inputting textual code points, do not special case terminal input:
         options.input_is_terminal = (options.input_format != input_format_t::TEXTUAL_CODEPOINT) && isatty(STDIN_FILENO);
@@ -684,13 +691,12 @@ int main(int argc, char** argv) {
         read_and_echo(options);
 
         if (options.print_summary) {
-                char const* color_prefix = options.terminal_color_output ? "\x1B[35m" : "";
-                char const* color_suffix = options.terminal_color_output ? "\x1B[m" : "";
+                char const* color_prefix = options.output_is_terminal ? "\x1B[35m" : "";
+                char const* color_suffix = options.output_is_terminal ? "\x1B[m" : "";
                 uint64_t bytes_encountered = options.bytes_into_input - options.byte_skip_offset;
                 fprintf(stderr, "%sSummary: %" PRIu64 " code points decoded from %" PRIu64 " bytes with %" PRIu64 " errors%s\n",
                                  color_prefix, options.codepoints_into_input, bytes_encountered, options.error_count, color_suffix);
-        } else if (is_output_tty && options.output_format != output_format_t::DESCRIPTION_CODEPOINT  && options.output_format != output_format_t::DESCRIPTION_DECODING && options.output_format != output_format_t::SILENT) {
-                // Finish with newlines if writing raw output to terminal
+        } else if (options.output_is_terminal && options.output_format != output_format_t::DESCRIPTION_CODEPOINT  && options.output_format != output_format_t::DESCRIPTION_DECODING && options.output_format != output_format_t::SILENT) {
                 printf("\n");
         }
 
