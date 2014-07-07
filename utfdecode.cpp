@@ -284,9 +284,6 @@ void encode_codepoint(uint32_t codepoint, program_options_t& program) {
 
 void process_utf8_byte(uint8_t byte, uint8_t* utf8_buffer, uint8_t& utf8_pos, uint8_t& remaining_utf8_continuation_bytes, program_options_t& options) {
         bool invalid_utf8_seq = false; 
-        if (options.input_format == input_format_t::UTF16LE) {
-                return;
-        }
         if (byte <= 127) {
                 invalid_utf8_seq = (remaining_utf8_continuation_bytes > 0);
                 if (invalid_utf8_seq) {
@@ -565,12 +562,12 @@ int main(int argc, char** argv) {
                         case 'd':
                                 if (strcmp(optarg, "utf8") == 0) {
                                         options.input_format = input_format_t::UTF8;
-                                } else if (strcmp(optarg, "utf16le") == 0 || strcmp(optarg, "utf16-le")
+                                } else if (strcmp(optarg, "utf16le") == 0 || strcmp(optarg, "utf16-le") == 0
                                            || strcmp(optarg, "utf16") == 0 || strcmp(optarg, "utf-16") == 0) {
                                         options.input_format = input_format_t::UTF16LE;
                                 } else if (strcmp(optarg, "utf16be") == 0 || strcmp(optarg, "utf16-be") == 0) {
                                         options.input_format = input_format_t::UTF16BE;
-                                } else if (strcmp(optarg, "utf32le") == 0 || strcmp(optarg, "utf32-le")
+                                } else if (strcmp(optarg, "utf32le") == 0 || strcmp(optarg, "utf32-le") == 0
                                            || strcmp(optarg, "utf32") == 0 || strcmp(optarg, "utf-32") == 0) {
                                         options.input_format = input_format_t::UTF32LE;
                                 } else if (strcmp(optarg, "utf32be") == 0 || strcmp(optarg, "utf32-be") == 0) {
@@ -589,7 +586,7 @@ int main(int argc, char** argv) {
                                         options.output_format = output_format_t::DESCRIPTION_DECODING;
                                 } else if (strcmp(optarg, "utf8") == 0) {
                                         options.output_format = output_format_t::UTF8;
-                                } else if (strcmp(optarg, "utf16le") == 0 || strcmp(optarg, "utf16-le")
+                                } else if (strcmp(optarg, "utf16le") == 0 || strcmp(optarg, "utf16-le") == 0
                                            || strcmp(optarg, "utf16") == 0 || strcmp(optarg, "utf-16") == 0) {
                                         options.output_format = output_format_t::UTF16LE;
                                 } else if (strcmp(optarg, "utf16be") == 0 || strcmp(optarg, "utf16-be") == 0) {
