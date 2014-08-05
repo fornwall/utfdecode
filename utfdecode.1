@@ -38,6 +38,11 @@ and 'codepoint' for decoding textual U+XXXX code points.
 .It Fl l Ar limit , Fl Fl limit Ns = Ns Ar limit
 Limit the decoding to the specified number of bytes.
 
+.It Fl m Ar handling , Fl Fl malformed-handling Ns = Ns Ar handling
+Specify what should happen on decoding errors: 'ignore' to ignore invalid input
+, 'replace' to replace with the unicode replacement character � (U+FFFD)
+and 'abort' to abort the program directly with exit value 65.
+
 .It Fl o Ar offset , Fl Fl offset Ns = Ns Ar offset
 Skip the specified number of bytes before starting decoding.
 
