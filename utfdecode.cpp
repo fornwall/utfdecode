@@ -62,14 +62,9 @@ struct program_options_t {
 
         bool print_byte_input() const { return output_format == output_format_t::DESCRIPTION_DECODING && input_format != input_format_t::TEXTUAL_CODEPOINT; };
         bool is_silent_output() const { return output_format == output_format_t::SILENT; };
-        // bool is_report_errors() const { return error_reporting == error_reporting_t::REPORT_STDERR; }
-        //void check_exit_on_error() { if (error_handling == error_handling_t::ABORT) exit(EX_DATAERR); }
         bool is_replace_errors() { return error_handling == error_handling_t::REPLACE; }
 
-        void output_formatted_byte(FILE* where, uint8_t byte) {
-                fprintf(where, "0x%02X - ", (int) byte);
-        }
-
+        void output_formatted_byte(FILE* where, uint8_t byte) { fprintf(where, "0x%02X - ", (int) byte); }
 
         void note_error(int byte, char const* error_msg, ...) {
                 error_count++;
@@ -691,7 +686,7 @@ int main(int argc, char** argv) {
                 char const* color_prefix = options.output_is_terminal ? "\x1B[35m" : "";
                 char const* color_suffix = options.output_is_terminal ? "\x1B[m" : "";
                 uint64_t bytes_encountered = options.bytes_into_input - options.byte_skip_offset;
-                fprintf(stderr, "%sSummary: %" PRIu64 " code points decoded from %" PRIu64 " bytes with %" PRIu64 " errors%s\n",
+                fprintf(stderr, "%s%" PRIu64 " code points from %" PRIu64 " bytes with %" PRIu64 " errors%s\n",
                                  color_prefix, options.codepoints_into_input, bytes_encountered, options.error_count, color_suffix);
         } else if (options.output_is_terminal && options.output_format != output_format_t::DESCRIPTION_CODEPOINT  && options.output_format != output_format_t::DESCRIPTION_DECODING && options.output_format != output_format_t::SILENT) {
                 printf("\n");
