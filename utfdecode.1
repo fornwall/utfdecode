@@ -28,12 +28,12 @@ The following options are available:
 
 .Bl -tag -width indent
 
-.It Fl e Ar format , Fl Fl encode-format Ns = Ns Ar format
-Encode in the specified encoding.
-
 .It Fl d Ar format , Fl Fl decode-format Ns = Ns Ar format
 Determine how input should be decoded. The format can be 'utf8' (default) to decode UTF-8
 and 'codepoint' for decoding textual U+XXXX code points.
+
+.It Fl e Ar format , Fl Fl encode-format Ns = Ns Ar format
+Encode in the specified encoding.
 
 .It Fl l Ar limit , Fl Fl limit Ns = Ns Ar limit
 Limit the decoding to the specified number of bytes.
@@ -46,11 +46,11 @@ and 'abort' to abort the program directly with exit value 65.
 .It Fl o Ar offset , Fl Fl offset Ns = Ns Ar offset
 Skip the specified number of bytes before starting decoding.
 
-.It Fl s , Fl Fl summary
-Print a summary at end of the decoding showing number of bytes, characters and decoding errors.
-
 .It Fl q , Fl Fl quiet-errors
 Do not log errors to stderr.
+
+.It Fl s , Fl Fl summary
+Print a summary at end of the decoding showing number of bytes, characters and decoding errors.
 
 .Sh EXIT STATUS
 The
