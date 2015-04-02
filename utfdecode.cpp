@@ -284,7 +284,7 @@ void process_utf8_byte(uint8_t byte, uint8_t* utf8_buffer, uint8_t& utf8_pos, ui
                 if (invalid_utf8_seq) {
                         options.note_error(byte, "expected continuation byte");
                 } else {
-                        options.print_byte_result(byte, "single-byte UTF-8 sequence: ");
+                        options.print_byte_result(byte, "single-byte sequence: ");
                         encode_codepoint(byte, options);
                 }
         } else if ((byte & /*0b11000000=*/0xc0) == /*0b10000000=*/0x80) {
