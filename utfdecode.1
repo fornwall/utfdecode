@@ -1,4 +1,4 @@
-.Dd July 3 2014
+.Dd April 4 2015
 .Dt UTFDECODE 1
 
 .Sh NAME
@@ -84,7 +84,7 @@ Check a file for UTF-8 encoding errors, listing all the errors:
 
 Debug the UTF-8 encoding looking at the first 100 bytes at an offset of 1024:
 .Pp
-.Dl $ utfdecode -o 1024 -l 100 myfile
+.Dl $ utfdecode -l 100 -o 1024 myfile
 .Pp
 
 See a summary of how many bytes, unicode characters and encoding errors there
@@ -107,7 +107,7 @@ See how the unicode character
 .Sq U+8278
 looks when written to the terminal in UTF-8:
 .Pp
-.Dl $ echo U+8278 | utfdecode -d codepoint -e codepoint
+.Dl $ echo U+8278 | utfdecode -d codepoint -e utf8
 .Pp
 
 Compare how many bytes a file would be in different encodings:
@@ -119,4 +119,4 @@ Compare how many bytes a file would be in different encodings:
 .Xr iconv 1
 
 .Sh AUTHOR
-Fredrik Fornwall <fredrik@fornwall.net>
+.An Fredrik Fornwall Aq Mt fredrik@fornwall.net
