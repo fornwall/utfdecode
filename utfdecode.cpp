@@ -17,6 +17,7 @@
 
 #include "musl/wcwidth_musl.h"
 #include "unicode_blocks.hpp"
+#include "unicode_code_points.hpp"
 
 /* From sysexits.h: */
 #define EX_OK           0       /* successful termination */
@@ -176,7 +177,7 @@ void encode_codepoint(uint32_t codepoint, program_options_t& program) {
                 if (wcwidth_value != -1) {
                         printf(" = '%s'", utf8_buffer);
                 }
-                if (codepoint <= 127 && program.output_format == output_format_t::DESCRIPTION_DECODING) {
+                if (program.output_format == output_format_t::DESCRIPTION_DECODING) {
                         switch (codepoint) {
                                 case 0:   printf(" (Null character ^@ \\0)"); break;
                                 case 1:   printf(" (Start of Header ^A)"); break;
@@ -211,9 +212,13 @@ void encode_codepoint(uint32_t codepoint, program_options_t& program) {
                                 case 30:  printf(" (Group Separator ^^)"); break;
                                 case 31:  printf(" (Unit Separator ^_)"); break;
                                 case 127: printf(" (Delete ^?)"); break;
+				default:
+					  auto code_point_info = unicode_code_points.find(codepoint);
+					  if (code_point_info != unicode_code_points.end()) {
+						  printf(" (%s)", code_point_info->second.name);
+					  }
                         }
-                }
-                if (program.output_format == output_format_t::DESCRIPTION_DECODING) {
+
                         char const* plane_name = "???";
                         if (codepoint <= 0xFFFF) {
                                 plane_name = "0 Basic Multilingual Plane (BMP)";
@@ -513,15 +518,15 @@ void print_usage_and_exit(char const* program_name, int exit_status) {
                         "                                     * utf16be - decode input as UTF-16, big endian encoded\n"
                         "                                     * utf32le - decode input as UTF-32, little endian encoded\n"
                         "                                     * utf32be - decode input as UTF-32, big endian encoded\n"
-                        "  -e, --encode-format FORMAT      Determine how output should encoded. Accepts same as the above decoding formats and adds:\n"
+                        "  -e, --encode-format FORMAT     Determine how output should encoded. Accepts same as the above decoding formats and adds:\n"
                         "                                     * decoding (default) - debug output of the complete decoding process\n"
                         "                                     * silent - no output\n"
                         "  -h, --help                     Show this help and exit\n"
                         "  -l, --limit LIMIT              Only decode up to the specified amount of bytes\n"
                         "  -m, --malformed-handling       Determine what should happen on decoding error:\n"
+                        "                                     * abort - abort the program directly with exit value 65\n"
                         "                                     * ignore - ignore invalid input\n"
                         "                                     * replace (default) - replace with the unicode replacement character � (U+FFFD)\n"
-                        "                                     * abort - abort the program directly with exit value 65\n"
                         "  -n, --newlines-after-reads     Write out newlines after each read call\n"
                         "  -o, --offset OFFSET            Skip the specified amount of bytes before starting decoding\n"
                         "  -q, --quiet-errors             Do not log decoding errors to stderr\n"
@@ -681,6 +686,8 @@ int main(int argc, char** argv) {
 
                 tcsetattr(STDIN_FILENO, TCSANOW, &vt_new);
         }
+
+	unicode_code_points_initialize();
         read_and_echo(options);
 
         if (options.print_summary) {
