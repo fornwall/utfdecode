@@ -17,25 +17,33 @@ print("    uint32_t simple_lowercase_mapping;")
 print("    uint32_t simple_titlecase_mapping;")
 print("};")
 print("")
-print("std::map<uint32_t, code_point> unicode_code_points = {")
+print("std::map<uint32_t, code_point> unicode_code_points;")
+print("static code_point code_points_array[] = {")
 
 for line in open("UnicodeData.txt"):
 	parts = line.split(';')
 	numeric_value = int(parts[0], 16)
 
 	name = parts[1]
+	general_category = parts[2] # http://www.unicode.org/reports/tr44/#General_Category_Values
 	bidi_mirrored = 'true' if parts[9] == 'Y' else 'false'
 	simple_uppercase_mapping = 0 if parts[12] == '' else int(parts[12], 16)
 	simple_lowercase_mapping = 0 if parts[13] == '' else int(parts[13], 16)
 	simple_titlecase_mapping = simple_uppercase_mapping if parts[14] == '\n' else int(parts[14], 16)
 
-	print(' { ' + str(numeric_value) + ', { ' + str(numeric_value) + ', "' + name + '", ' + bidi_mirrored  + 
+	print(' { ' + str(numeric_value) + ', "' + name + '", ' + bidi_mirrored  + 
 			', ' + str(simple_uppercase_mapping) +
 			', ' + str(simple_lowercase_mapping) +
 			', ' + str(simple_titlecase_mapping) +
-			' }},')
+			' },')
 
 print("};")
+print("")
+print("void unicode_code_points_initialize() {")
+print("    for (unsigned int i = 0; i < sizeof(code_points_array) / sizeof(code_points_array[0]); i++) {")
+print("        unicode_code_points[code_points_array[i].numeric_value] = code_points_array[i];")
+print("    }")
+print("}")
 print("")
 print("#endif")
 
