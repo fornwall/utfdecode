@@ -167,84 +167,79 @@ int codepoint_to_utf8(uint32_t codePoint, uint8_t* utf8InputBuffer) {
 }
 
 void encode_codepoint(uint32_t codepoint, program_options_t& program) {
-        program.codepoints_into_input++;
-        if (program.is_silent_output()) return;
+	program.codepoints_into_input++;
+	if (program.is_silent_output()) return;
 
-        if (program.output_format == output_format_t::DESCRIPTION_DECODING || program.output_format == output_format_t::DESCRIPTION_CODEPOINT) {
-                uint8_t utf8_buffer[5];
-                int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
-                utf8_buffer[utf8_byte_count] = 0;
-                int wcwidth_value = wcwidth_musl(codepoint);
-                if (wcwidth_value != -1) {
-                        printf("'%s' = ", utf8_buffer);
-                }
-                printf("U+%04X", codepoint);
-                if (program.output_format == output_format_t::DESCRIPTION_DECODING) {
-                        switch (codepoint) {
-                                case 0:   printf(" (Null character ^@ \\0)"); break;
-                                case 1:   printf(" (Start of Header ^A)"); break;
-                                case 2:   printf(" (Start of Text ^B)"); break;
-                                case 3:   printf(" (End of Text	^C)"); break;
-                                case 4:   printf(" (End of Transmission	^D)"); break;
-                                case 5:   printf(" (Enquiry ^E)"); break;
-                                case 6:   printf(" (Acknowledgement ^F)"); break;
-                                case 7:   printf(" (Bell ^G)"); break;
-                                case 8:   printf(" (Backspace ^H \\b)"); break;
-                                case 9:   printf(" (Horizontal tab ^I \\t)"); break;
-                                case 10:  printf(" (Line feed (^J, \\n)"); break;
-                                case 11:  printf(" (Vertical tab ^K \\v)"); break;
-                                case 12:  printf(" (Form feed ^L \\f)"); break;
-                                case 13:  printf(" (Carriage return (^M, \\r)"); break;
-                                case 14:  printf(" (Start of Text ^N)"); break;
-                                case 15:  printf(" (Shift In ^O	)"); break;
-                                case 16:  printf(" (Shift Out ^P )"); break;
-                                case 17:  printf(" (Device Control 1 ^Q)"); break;
-                                case 18:  printf(" (Device Control 2 ^R)"); break;
-                                case 19:  printf(" (Device Control 3 ^S)"); break;
-                                case 20:  printf(" (Device Control 4 ^T)"); break;
-                                case 21:  printf(" (Negative Acknowledgement ^U)"); break;
-                                case 22:  printf(" (Synchronous idle ^V)"); break;
-                                case 23:  printf(" (End of Transmission Block ^W)"); break;
-                                case 24:  printf(" (Cancel ^X)"); break;
-                                case 25:  printf(" (End of Medium ^Y)"); break;
-                                case 26:  printf(" (Substitute ^Z)"); break;
-                                case 27:  printf(" (Escape ^[ \\e)"); break;
-                                case 28:  printf(" (File Separator ^\\)"); break;
-                                case 29:  printf(" (Record Separator ^])"); break;
-                                case 30:  printf(" (Group Separator ^^)"); break;
-                                case 31:  printf(" (Unit Separator ^_)"); break;
-                                case 127: printf(" (Delete ^?)"); break;
-				default:
-					  auto code_point_info = unicode_code_points.find(codepoint);
-					  if (code_point_info != unicode_code_points.end()) {
-						  printf(" (%s)", code_point_info->second.name);
-					  }
-                        }
+	if (program.output_format == output_format_t::DESCRIPTION_DECODING || program.output_format == output_format_t::DESCRIPTION_CODEPOINT) {
+		uint8_t utf8_buffer[5];
+		int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
+		utf8_buffer[utf8_byte_count] = 0;
+		int wcwidth_value = wcwidth_musl(codepoint);
+		if (wcwidth_value != -1) {
+			printf("'%s' = ", utf8_buffer);
+		}
+		printf("U+%04X", codepoint);
+		switch (codepoint) {
+			case 0:   printf(" (Null character ^@ \\0)"); break;
+			case 1:   printf(" (Start of Header ^A)"); break;
+			case 2:   printf(" (Start of Text ^B)"); break;
+			case 3:   printf(" (End of Text	^C)"); break;
+			case 4:   printf(" (End of Transmission	^D)"); break;
+			case 5:   printf(" (Enquiry ^E)"); break;
+			case 6:   printf(" (Acknowledgement ^F)"); break;
+			case 7:   printf(" (Bell ^G)"); break;
+			case 8:   printf(" (Backspace ^H \\b)"); break;
+			case 9:   printf(" (Horizontal tab ^I \\t)"); break;
+			case 10:  printf(" (Line feed (^J, \\n)"); break;
+			case 11:  printf(" (Vertical tab ^K \\v)"); break;
+			case 12:  printf(" (Form feed ^L \\f)"); break;
+			case 13:  printf(" (Carriage return (^M, \\r)"); break;
+			case 14:  printf(" (Start of Text ^N)"); break;
+			case 15:  printf(" (Shift In ^O	)"); break;
+			case 16:  printf(" (Shift Out ^P )"); break;
+			case 17:  printf(" (Device Control 1 ^Q)"); break;
+			case 18:  printf(" (Device Control 2 ^R)"); break;
+			case 19:  printf(" (Device Control 3 ^S)"); break;
+			case 20:  printf(" (Device Control 4 ^T)"); break;
+			case 21:  printf(" (Negative Acknowledgement ^U)"); break;
+			case 22:  printf(" (Synchronous idle ^V)"); break;
+			case 23:  printf(" (End of Transmission Block ^W)"); break;
+			case 24:  printf(" (Cancel ^X)"); break;
+			case 25:  printf(" (End of Medium ^Y)"); break;
+			case 26:  printf(" (Substitute ^Z)"); break;
+			case 27:  printf(" (Escape ^[ \\e)"); break;
+			case 28:  printf(" (File Separator ^\\)"); break;
+			case 29:  printf(" (Record Separator ^])"); break;
+			case 30:  printf(" (Group Separator ^^)"); break;
+			case 31:  printf(" (Unit Separator ^_)"); break;
+			case 127: printf(" (Delete ^?)"); break;
+			default:
+				  auto code_point_info = unicode_code_points.find(codepoint);
+				  if (code_point_info != unicode_code_points.end()) {
+					  printf(" (%s)", code_point_info->second.name);
+				  }
+		}
+		char const* plane_name = "???";
+		if (codepoint <= 0xFFFF) {
+			plane_name = "0 Basic Multilingual Plane (BMP)";
+		} else if (codepoint <= 0x1FFFF) {
+			plane_name = "1 Supplementary Multilingual Plane (SMP)";
+		} else if (codepoint < 0x2FFFF) {
+			plane_name = "2 Supplementary Ideographic Plane (SIP)";
+		} else if (codepoint <= 0xDFFFF) {
+			plane_name = "*Unassigned*";
+		} else if (codepoint <= 0xEFFFF) {
+			plane_name = "14 Supplement­ary Special-purpose Plane (SSP)";
+		} else if (codepoint <= 0xFFFFD) {
+			plane_name = "15 Supplemental Private Use Area-A (S PUA A)";
+		} else if (codepoint <= 0x10FFFD) {
+			plane_name = "16 Supplemental Private Use Area-B (S PUA B)";
+		} else {
+			die_with_internal_error("plane out of range");
+		}
 
-                        char const* plane_name = "???";
-                        if (codepoint <= 0xFFFF) {
-                                plane_name = "0 Basic Multilingual Plane (BMP)";
-                        } else if (codepoint <= 0x1FFFF) {
-                                plane_name = "1 Supplementary Multilingual Plane (SMP)";
-                        } else if (codepoint < 0x2FFFF) {
-                                plane_name = "2 Supplementary Ideographic Plane (SIP)";
-                        } else if (codepoint <= 0xDFFFF) {
-                                plane_name = "*Unassigned*";
-                        } else if (codepoint <= 0xEFFFF) {
-                                plane_name = "14 Supplement­ary Special-purpose Plane (SSP)";
-                        } else if (codepoint <= 0xFFFFD) {
-                                plane_name = "15 Supplemental Private Use Area-A (S PUA A)";
-                        } else if (codepoint <= 0x10FFFD) {
-                                plane_name = "16 Supplemental Private Use Area-B (S PUA B)";
-                        } else {
-                                die_with_internal_error("plane out of range");
-                        }
-
-                        char const* block_name = get_block_name(codepoint);
-                        printf(" from the block %s in plane %s. wcwidth=%d\n", block_name, plane_name, wcwidth_value);
-                } else {
-                        printf("\n");
-                }
+		char const* block_name = get_block_name(codepoint);
+		printf(" from the block %s in plane %s. wcwidth=%d\n", block_name, plane_name, wcwidth_value);
         } else if (program.output_format == output_format_t::UTF8) {
                 uint8_t utf8_buffer[5];
                 int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
