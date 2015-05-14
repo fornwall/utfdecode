@@ -15,6 +15,8 @@
 #include <unistd.h>
 #include <wchar.h>
 
+#include "config.h"
+
 #include "musl/wcwidth_musl.h"
 #include "unicode_blocks.hpp"
 #include "unicode_code_points.hpp"
@@ -550,12 +552,13 @@ int main(int argc, char** argv) {
                 {"quiet-errors", no_argument, nullptr, 'q'},
                 {"summary", no_argument, nullptr, 's'},
                 {"timestamps", no_argument, nullptr, 't'},
+                {"version", no_argument, nullptr, 'v'},
                 {0, 0, 0, 0}
         };
 
         while (true) {
                 int option_index = 0;
-                int c = getopt_long(argc, argv, "d:e:hl:m:no:qst", getopt_options, &option_index);
+                int c = getopt_long(argc, argv, "d:e:hl:m:no:qstv", getopt_options, &option_index);
                 if (c == -1) break;
                 bool print_error_and_exit = false;
                 int exit_status = EX_USAGE;
@@ -646,6 +649,10 @@ int main(int argc, char** argv) {
                         case 't': 
                                 options.timestamps = true; 
                                 break;
+			case 'v':
+				printf("%s\n", PACKAGE_VERSION);
+				return 0;
+				break;
                         default:
                                 print_error_and_exit = true;
                                 break;
