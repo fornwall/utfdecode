@@ -169,14 +169,14 @@ void encode_codepoint(uint32_t codepoint, program_options_t& program) {
         if (program.is_silent_output()) return;
 
         if (program.output_format == output_format_t::DESCRIPTION_DECODING || program.output_format == output_format_t::DESCRIPTION_CODEPOINT) {
-                printf("U+%04X", codepoint);
                 uint8_t utf8_buffer[5];
                 int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
                 utf8_buffer[utf8_byte_count] = 0;
                 int wcwidth_value = wcwidth_musl(codepoint);
                 if (wcwidth_value != -1) {
-                        printf(" = '%s'", utf8_buffer);
+                        printf("'%s' = ", utf8_buffer);
                 }
+                printf("U+%04X", codepoint);
                 if (program.output_format == output_format_t::DESCRIPTION_DECODING) {
                         switch (codepoint) {
                                 case 0:   printf(" (Null character ^@ \\0)"); break;
