@@ -1,54 +1,41 @@
-.Dd May 5 2015
+.Dd 2015-05-14
 .Dt UTFDECODE 1
-
 .Sh NAME
 .Nm utfdecode
 .Nd unicode decoder, encoder and debugger
-
 .Sh SYNOPSIS
 .Nm utfdecode
 .Bk -words
-.Op Fl dehlmnoqst
+.Op Fl hlmnoqst
 .Op Fl e Ar format
 .Op Fl d Ar format
-
 .Ek
-
 .Sh DESCRIPTION
 The
 .Nm utfdecode
 utility reads input from stdin, decodes it and encodes to stdout and can be used to debug valid and invalid UTF-encoded content
 as well as cleaning up and transforming between utf-8/16/32 formats.
-
 .Pp
 The following options are available:
-
-.Bl -tag -width indent
-
+.Bl -tag -width Ds
 .It Fl d Ar format , Fl Fl decode-format Ns = Ns Ar format
 Determine how input should be decoded. The format can be 'utf8' (default) to decode UTF-8
 and 'codepoint' for decoding textual U+XXXX code points.
-
 .It Fl e Ar format , Fl Fl encode-format Ns = Ns Ar format
 Encode in the specified encoding.
-
 .It Fl l Ar limit , Fl Fl limit Ns = Ns Ar limit
 Limit the decoding to the specified number of bytes.
-
 .It Fl m Ar handling , Fl Fl malformed-handling Ns = Ns Ar handling
 Specify what should happen on decoding errors: 'ignore' to ignore invalid input
 , 'replace' to replace with the unicode replacement character (U+FFFD)
 and 'abort' to abort the program directly with exit value 65.
-
 .It Fl o Ar offset , Fl Fl offset Ns = Ns Ar offset
 Skip the specified number of bytes before starting decoding.
-
 .It Fl q , Fl Fl quiet-errors
 Do not log errors to stderr.
-
 .It Fl s , Fl Fl summary
 Print a summary at end of the decoding showing number of bytes, characters and decoding errors.
-
+.El
 .Sh EXIT STATUS
 The
 .Nm utfdecode
@@ -66,54 +53,43 @@ The specified input file could not be opened.
 .It Li 74
 There was an input/output error.
 .El
-
 .Sh EXAMPLES
-
 See the terminal input on key presses, writing a newline between reads/key presses:
 .Pp
 .Dl $ utfdecode -n
 .Pp
-
 Check a file for UTF-8 encoding errors, listing all the errors:
 .Pp
 .Dl $ utfdecode -e silent myfile
 .Pp
-
 Debug the UTF-8 encoding looking at the first 100 bytes at an offset of 1024:
 .Pp
 .Dl $ utfdecode -l 100 -o 1024 myfile
 .Pp
-
 See a summary of how many bytes, unicode characters and encoding errors there
 is at the start page of english Wikipedia:
 .Pp
 .Dl $ curl -s http://en.wikipedia.org/wiki/Main_Page | utfdecode -e silent -s
 .Pp
-
 Validate a file in shell script without output:
 .Pp
 .Dl $ if utfdecide -e silent -q myfile; then process_file; else handle_error; fi
 .Pp
-
 Convert a file from UTF-16BE to UTF-8:
 .Pp
 .Dl $ utfdecode -d utf16be -e utf8 silent myfile
 .Pp
-
 See how the unicode character
 .Sq U+8278
 looks when written to the terminal in UTF-8:
 .Pp
 .Dl $ echo U+8278 | utfdecode -d codepoint -e utf8
 .Pp
-
 Compare how many bytes a file would be in different encodings:
 .Pp
 .Dl $ for e in utf8 utf16be utf32be; do echo "$e:"; utfdecode -e $e myfile | wc -c; done
 .Pp
-
 .Sh SEE ALSO
 .Xr iconv 1
-
 .Sh AUTHOR
 .An Fredrik Fornwall Aq Mt fredrik@fornwall.net
