@@ -55,6 +55,8 @@ struct program_options_t {
         bool print_summary{false};
         bool output_is_terminal{false};
         bool input_is_terminal{false};
+        bool block_info{false};
+        bool wcwidth{false};
 
         struct termios vt_orig;
 
@@ -96,7 +98,7 @@ struct program_options_t {
                         exit(EX_DATAERR);
                 }
         }
-        
+
         void cleanup_and_exit(int exit_status) {
                 if (input_is_terminal) tcsetattr(0, TCSANOW, &vt_orig);
                 exit(exit_status);
@@ -121,7 +123,7 @@ struct program_options_t {
 };
 
 /* Assumes that the buffer is already validated. Does not handle overlong encodings. */
-uint32_t utf8_sequence_to_codepoint(uint8_t* buffer, uint8_t length) {  
+uint32_t utf8_sequence_to_codepoint(uint8_t* buffer, uint8_t length) {
         uint32_t code_point;
         uint32_t first_byte_mask;
         switch (length) {
@@ -219,27 +221,32 @@ void encode_codepoint(uint32_t codepoint, program_options_t& program) {
 					  printf(" (%s)", code_point_info->second.name);
 				  }
 		}
-		char const* plane_name = "???";
-		if (codepoint <= 0xFFFF) {
-			plane_name = "0 Basic Multilingual Plane (BMP)";
-		} else if (codepoint <= 0x1FFFF) {
-			plane_name = "1 Supplementary Multilingual Plane (SMP)";
-		} else if (codepoint < 0x2FFFF) {
-			plane_name = "2 Supplementary Ideographic Plane (SIP)";
-		} else if (codepoint <= 0xDFFFF) {
-			plane_name = "*Unassigned*";
-		} else if (codepoint <= 0xEFFFF) {
-			plane_name = "14 Supplement­ary Special-purpose Plane (SSP)";
-		} else if (codepoint <= 0xFFFFD) {
-			plane_name = "15 Supplemental Private Use Area-A (S PUA A)";
-		} else if (codepoint <= 0x10FFFD) {
-			plane_name = "16 Supplemental Private Use Area-B (S PUA B)";
-		} else {
-			die_with_internal_error("plane out of range");
-		}
 
-		char const* block_name = get_block_name(codepoint);
-		printf(" from the block %s in plane %s. wcwidth=%d\n", block_name, plane_name, wcwidth_value);
+                if (program.block_info) {
+                    char const* plane_name = "???";
+                    if (codepoint <= 0xFFFF) {
+                            plane_name = "0 Basic Multilingual Plane (BMP)";
+                    } else if (codepoint <= 0x1FFFF) {
+                            plane_name = "1 Supplementary Multilingual Plane (SMP)";
+                    } else if (codepoint < 0x2FFFF) {
+                            plane_name = "2 Supplementary Ideographic Plane (SIP)";
+                    } else if (codepoint <= 0xDFFFF) {
+                            plane_name = "*Unassigned*";
+                    } else if (codepoint <= 0xEFFFF) {
+                            plane_name = "14 Supplement­ary Special-purpose Plane (SSP)";
+                    } else if (codepoint <= 0xFFFFD) {
+                            plane_name = "15 Supplemental Private Use Area-A (S PUA A)";
+                    } else if (codepoint <= 0x10FFFD) {
+                            plane_name = "16 Supplemental Private Use Area-B (S PUA B)";
+                    } else {
+                            die_with_internal_error("plane out of range");
+                    }
+
+                    char const* block_name = get_block_name(codepoint);
+                    printf(". Block %s in plane %s", block_name, plane_name);
+                }
+                if (program.wcwidth) printf(". wcwidth=%d", wcwidth_value);
+                printf("\n");
         } else if (program.output_format == output_format_t::UTF8) {
                 uint8_t utf8_buffer[5];
                 int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
@@ -508,6 +515,7 @@ void read_and_echo(program_options_t& options) {
 
 void print_usage_and_exit(char const* program_name, int exit_status) {
         fprintf(stderr, "usage: %s [OPTIONS] [file]\n"
+                        "  -b, --block-info               Show block and plane information. Only relevant if using the 'decoding' format\n"
                         "  -d, --decode-format FORMAT     Determine how input should be decoded:\n"
                         "                                     * codepoint - decode input as textual U+XXXX descriptions\n"
                         "                                     * utf8 (default) - decode input as UTF-8\n"
@@ -529,6 +537,7 @@ void print_usage_and_exit(char const* program_name, int exit_status) {
                         "  -q, --quiet-errors             Do not log decoding errors to stderr\n"
                         "  -s, --summary                  Show a summary at end of input\n"
                         "  -t, --timestamps               Show a timestamp after each input read\n"
+                        "  -w, --wcwidth                  Show information about the wcwidth property for 'decoding'\n"
                         , program_name);
         exit(exit_status);
 }
@@ -537,8 +546,9 @@ int main(int argc, char** argv) {
         setlocale(LC_ALL, NULL);
         program_options_t options;
         struct option getopt_options[] = {
-                {"decode-format", required_argument, nullptr, 'd'},
+                {"block-info", no_argument, nullptr, 'b'},
                 {"encode-format", required_argument, nullptr, 'e'},
+                {"decode-format", required_argument, nullptr, 'd'},
                 {"help", no_argument, nullptr, 'h'},
                 {"limit", required_argument, nullptr, 'l'},
                 {"malformed-handling", required_argument, nullptr, 'm'},
@@ -548,16 +558,20 @@ int main(int argc, char** argv) {
                 {"summary", no_argument, nullptr, 's'},
                 {"timestamps", no_argument, nullptr, 't'},
                 {"version", no_argument, nullptr, 'v'},
+                {"wcwidth", no_argument, nullptr, 'w'},
                 {0, 0, 0, 0}
         };
 
         while (true) {
                 int option_index = 0;
-                int c = getopt_long(argc, argv, "d:e:hl:m:no:qstv", getopt_options, &option_index);
+                int c = getopt_long(argc, argv, "bd:e:hl:m:no:qstvw", getopt_options, &option_index);
                 if (c == -1) break;
                 bool print_error_and_exit = false;
                 int exit_status = EX_USAGE;
                 switch (c) {
+                        case 'b':
+                                options.block_info = true;
+                                break;
                         case 'd':
                                 if (strcmp(optarg, "utf8") == 0) {
                                         options.input_format = input_format_t::UTF8;
@@ -648,6 +662,9 @@ int main(int argc, char** argv) {
 				printf("%s\n", PACKAGE_VERSION);
 				return 0;
 				break;
+                        case 'w':
+                                options.wcwidth = true;
+                                break;
                         default:
                                 print_error_and_exit = true;
                                 break;
@@ -689,7 +706,7 @@ int main(int argc, char** argv) {
                 tcsetattr(STDIN_FILENO, TCSANOW, &vt_new);
         }
 
-	unicode_code_points_initialize();
+        unicode_code_points_initialize();
         read_and_echo(options);
 
         if (options.print_summary) {
