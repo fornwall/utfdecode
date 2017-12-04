@@ -1,4 +1,4 @@
-AM_CXXFLAGS = -Wall -Wextra -std=c++1y -pedantic
+AM_CXXFLAGS = -Wall -Wextra -std=c++14 -pedantic
 
 bin_PROGRAMS = utfdecode
 
