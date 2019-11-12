@@ -9,6 +9,7 @@ configure
 COPYING
 depcomp
 .deps
+.dirstamp
 INSTALL
 install-sh
 Makefile
@@ -16,4 +17,4 @@ Makefile.in
 missing
 stamp-h1
 utfdecode
-utfdecode.o
+*.o
