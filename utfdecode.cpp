@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <sysexits.h>
 #include <termios.h>
 #include <unistd.h>
 #include <wchar.h>
@@ -25,15 +26,6 @@
 #include "unicode_blocks.hpp"
 #include "unicode_code_points.hpp"
 #include "unicode_decomposition.hpp"
-
-/* From sysexits.h: */
-#define EX_OK 0        /* successful termination */
-#define EX_USAGE 64    /* command line usage error */
-#define EX_DATAERR 65  /* data format error */
-#define EX_NOINPUT 66  /* cannot open input */
-#define EX_SOFTWARE 70 /* internal software error */
-#define EX_IOERR 74    /* input/output error */
-#define EX_NOPERM 77   /* permission denied */
 
 enum class input_format_t {
   UTF8,
