@@ -16,5 +16,6 @@ Makefile
 Makefile.in
 missing
 stamp-h1
-utfdecode
 *.o
+.idea/
+.gradle/
