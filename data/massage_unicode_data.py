@@ -73,6 +73,10 @@ for line in open("UnicodeData.txt"):
 
     # http://www.unicode.org/reports/tr44/#General_Category_Values
     name = parts[1]
+    if name == '<control>' and parts[10]:
+        # Field 10 is "Old name as published in Unicode 1.0 or ISO 6429 names
+        # for control functions", which is more helpful then "<control>":
+        name = parts[10]
     general_category = parts[2]
     canonical_combining_class = parts[3]
     bidi_mirrored = 'true' if parts[9] == 'Y' else 'false'
