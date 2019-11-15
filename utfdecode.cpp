@@ -21,9 +21,9 @@
 
 #include "musl/wcwidth_musl.h"
 #include "normalization.hpp"
-#include "unicode_decomposition.hpp"
 #include "unicode_blocks.hpp"
 #include "unicode_code_points.hpp"
+#include "unicode_decomposition.hpp"
 
 /* From sysexits.h: */
 #define EX_OK 0        /* successful termination */
@@ -227,7 +227,8 @@ int codepoint_to_utf8(uint32_t codePoint, uint8_t *utf8InputBuffer) {
   return bufferPosition;
 }
 
-void encode_codepoint(uint32_t codepoint, program_options_t &program, bool output_non_starters = false) {
+void encode_codepoint(uint32_t codepoint, program_options_t &program,
+                      bool output_non_starters = false) {
   program.codepoints_into_input++;
 
   if (program.is_silent_output()) {
@@ -236,39 +237,41 @@ void encode_codepoint(uint32_t codepoint, program_options_t &program, bool outpu
 
   auto code_point_info = unicode_code_points.find(codepoint);
   if (code_point_info == unicode_code_points.end()) {
-	  die_with_internal_error("no such code point: %d", codepoint);
+    die_with_internal_error("no such code point: %d", codepoint);
   }
 
   if (program.normalization_form != normalization_form_t::NONE) {
-	  bool compatible = program.normalization_form == normalization_form_t::NFKC
-		  || program.normalization_form == normalization_form_t::NFKD;
+    bool compatible =
+        program.normalization_form == normalization_form_t::NFKC ||
+        program.normalization_form == normalization_form_t::NFKD;
 
-	  uint8_t len;
-	  uint32_t const* decomposed = unicode_decompose(codepoint, compatible, &len);
-	  if (len == 0) {
-		  if (!output_non_starters) {
-			  bool is_starter = code_point_info->second.canonical_combining_class == 0;
-			  if (is_starter) {
-				  std::vector<uint32_t> non_starters_copy = program.normalization_non_starters;
-				  program.normalization_non_starters.clear();
-				  // TODO: Reorder program.normalization_non_starters
-				  for (auto &cp : non_starters_copy) {
-					  encode_codepoint(cp, program, true);
-				  }
-			  } else {
-				  program.normalization_non_starters.push_back(codepoint);
-				  return;
-			  }
-		  }
-	  } else {
-		  // TODO: Recursive decomposition
-		  for (uint8_t i = 0; i < len; i++) {
-			  encode_codepoint(decomposed[i], program, true);
-		  }
-		  return;
-	  }
+    uint8_t len;
+    uint32_t const *decomposed = unicode_decompose(codepoint, compatible, &len);
+    if (len == 0) {
+      if (!output_non_starters) {
+        bool is_starter =
+            code_point_info->second.canonical_combining_class == 0;
+        if (is_starter) {
+          std::vector<uint32_t> non_starters_copy =
+              program.normalization_non_starters;
+          program.normalization_non_starters.clear();
+          // TODO: Reorder program.normalization_non_starters
+          for (auto &cp : non_starters_copy) {
+            encode_codepoint(cp, program, true);
+          }
+        } else {
+          program.normalization_non_starters.push_back(codepoint);
+          return;
+        }
+      }
+    } else {
+      // TODO: Recursive decomposition
+      for (uint8_t i = 0; i < len; i++) {
+        encode_codepoint(decomposed[i], program, true);
+      }
+      return;
+    }
   }
-
 
   if (program.output_format == output_format_t::DESCRIPTION_DECODING ||
       program.output_format == output_format_t::DESCRIPTION_CODEPOINT) {
@@ -381,7 +384,7 @@ void encode_codepoint(uint32_t codepoint, program_options_t &program, bool outpu
       printf(" (Delete ^?)");
       break;
     default:
-	  printf(" (%s)", code_point_info->second.name);
+      printf(" (%s)", code_point_info->second.name);
     }
 
     if (program.block_info) {
@@ -493,13 +496,14 @@ void process_utf8_byte(uint8_t byte, uint8_t *utf8_buffer, uint8_t &utf8_pos,
           options.note_error(byte, "overlong encoding of %u using %d bytes",
                              code_point, used_length);
         } else {
-          //options.print_byte_result(byte,
-                                    //"UTF-8 continuation byte 0b10xxxxxx: ");
+          // options.print_byte_result(byte,
+          //"UTF-8 continuation byte 0b10xxxxxx: ");
           encode_codepoint(code_point, options);
         }
         remaining_utf8_continuation_bytes = 0;
       } else {
-        //options.print_byte_result(byte, "UTF-8 continuation byte 0b10xxxxxx\n");
+        // options.print_byte_result(byte, "UTF-8 continuation byte
+        // 0b10xxxxxx\n");
       }
     }
   } else {
@@ -517,14 +521,14 @@ void process_utf8_byte(uint8_t byte, uint8_t *utf8_buffer, uint8_t &utf8_pos,
     }
     if (expect_following != -1) {
       if (remaining_utf8_continuation_bytes == 0) {
-		/*
-        options.print_byte_result(
-            byte, "leading %s byte for a %d byte sequence\n",
-            (expect_following == 1)
-                ? "0b110xxxxx"
-                : ((expect_following == 2) ? "0b1110xxxx" : "0b11110xxx"),
-            expect_following + 1);
-			*/
+        /*
+options.print_byte_result(
+    byte, "leading %s byte for a %d byte sequence\n",
+    (expect_following == 1)
+        ? "0b110xxxxx"
+        : ((expect_following == 2) ? "0b1110xxxx" : "0b11110xxx"),
+    expect_following + 1);
+                */
         remaining_utf8_continuation_bytes = expect_following;
         utf8_pos = 1;
         utf8_buffer[0] = byte;
