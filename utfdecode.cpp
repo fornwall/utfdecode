@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <wchar.h>
 
+#include <algorithm>
 #include <vector>
 
 #include "config.h"
@@ -228,7 +229,24 @@ int codepoint_to_utf8(uint32_t codePoint, uint8_t *utf8InputBuffer) {
 }
 
 void encode_codepoint(uint32_t codepoint, program_options_t &program,
-                      bool output_non_starters = false) {
+                      bool output_non_starters = false);
+
+void flush_normalization_non_starters(std::vector<uint32_t> &non_starters,
+                                      program_options_t &program) {
+  std::sort(non_starters.begin(), non_starters.end(),
+            [](uint32_t a, uint32_t b) {
+              auto ac = unicode_code_points[a].canonical_combining_class;
+              auto bc = unicode_code_points[b].canonical_combining_class;
+              return ac < bc;
+            });
+
+  for (auto cp : non_starters) {
+    encode_codepoint(cp, program, true);
+  }
+}
+
+void encode_codepoint(uint32_t codepoint, program_options_t &program,
+                      bool output_non_starters) {
   program.codepoints_into_input++;
 
   if (program.is_silent_output()) {
@@ -255,10 +273,8 @@ void encode_codepoint(uint32_t codepoint, program_options_t &program,
           std::vector<uint32_t> non_starters_copy =
               program.normalization_non_starters;
           program.normalization_non_starters.clear();
-          // TODO: Reorder program.normalization_non_starters
-          for (auto &cp : non_starters_copy) {
-            encode_codepoint(cp, program, true);
-          }
+
+          flush_normalization_non_starters(non_starters_copy, program);
         } else {
           program.normalization_non_starters.push_back(codepoint);
           return;
@@ -963,7 +979,10 @@ int main(int argc, char **argv) {
   }
 
   unicode_code_points_initialize();
+
   read_and_echo(options);
+
+  flush_normalization_non_starters(options.normalization_non_starters, options);
 
   if (options.print_summary) {
     char const *color_prefix = options.output_is_terminal ? "\x1B[35m" : "";
