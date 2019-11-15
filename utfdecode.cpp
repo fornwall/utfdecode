@@ -69,10 +69,12 @@ void die_with_internal_error [[noreturn]] (char const *fmt, ...) {
   exit(EX_SOFTWARE);
 }
 
+int codepoint_to_utf8(uint32_t codePoint, uint8_t *utf8InputBuffer);
+
 struct program_options_t {
   input_format_t input_format{input_format_t::UTF8};
   output_format_t output_format{output_format_t::DESCRIPTION_DECODING};
-  error_handling_t error_handling{error_handling_t::IGNORE};
+  error_handling_t error_handling{error_handling_t::REPLACE};
   error_reporting_t error_reporting{error_reporting_t::REPORT_STDERR};
   normalization_form_t normalization_form{normalization_form_t::NONE};
   bool timestamps{false};
@@ -105,8 +107,150 @@ struct program_options_t {
     return error_handling == error_handling_t::REPLACE;
   }
 
-  void output_formatted_byte(FILE *where, uint8_t byte) {
-    fprintf(where, "0x%02X - ", (int)byte);
+  void encode_codepoint(uint32_t codepoint, bool output_non_starters = false) {
+    this->codepoints_into_input++;
+
+    if (this->is_silent_output()) {
+      return;
+    }
+
+    auto code_point_info = unicode_code_points.find(codepoint);
+    if (code_point_info == unicode_code_points.end()) {
+      die_with_internal_error("no such code point: %d", codepoint);
+    }
+
+    if (this->normalization_form != normalization_form_t::NONE) {
+      bool compatible =
+          this->normalization_form == normalization_form_t::NFKC ||
+          this->normalization_form == normalization_form_t::NFKD;
+
+      uint8_t len;
+      uint32_t const *decomposed =
+          unicode_decompose(codepoint, compatible, &len);
+      if (len == 0) {
+        if (!output_non_starters) {
+          bool is_starter =
+              code_point_info->second.canonical_combining_class == 0;
+          if (is_starter) {
+            std::vector<uint32_t> non_starters_copy =
+                this->normalization_non_starters;
+            this->normalization_non_starters.clear();
+
+            flush_normalization_non_starters(non_starters_copy);
+          } else {
+            this->normalization_non_starters.push_back(codepoint);
+            return;
+          }
+        }
+      } else {
+        // TODO: Recursive decomposition
+        for (uint8_t i = 0; i < len; i++) {
+          this->encode_codepoint(decomposed[i], true);
+        }
+        return;
+      }
+    }
+
+    if (this->output_format == output_format_t::DESCRIPTION_DECODING ||
+        this->output_format == output_format_t::DESCRIPTION_CODEPOINT) {
+      uint8_t utf8_buffer[5];
+      int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
+      utf8_buffer[utf8_byte_count] = 0;
+      int wcwidth_value = wcwidth_musl(codepoint);
+      if (wcwidth_value != -1) {
+        printf("'%s' = ", utf8_buffer);
+      }
+      printf("U+%04X (%s)", codepoint, code_point_info->second.name);
+
+      if (this->block_info) {
+        char const *plane_name = "???";
+        if (codepoint <= 0xFFFF) {
+          plane_name = "0 Basic Multilingual Plane (BMP)";
+        } else if (codepoint <= 0x1FFFF) {
+          plane_name = "1 Supplementary Multilingual Plane (SMP)";
+        } else if (codepoint < 0x2FFFF) {
+          plane_name = "2 Supplementary Ideographic Plane (SIP)";
+        } else if (codepoint <= 0xDFFFF) {
+          plane_name = "*Unassigned*";
+        } else if (codepoint <= 0xEFFFF) {
+          plane_name = "14 Supplement­ary Special-purpose Plane (SSP)";
+        } else if (codepoint <= 0xFFFFD) {
+          plane_name = "15 Supplemental Private Use Area-A (S PUA A)";
+        } else if (codepoint <= 0x10FFFD) {
+          plane_name = "16 Supplemental Private Use Area-B (S PUA B)";
+        } else {
+          die_with_internal_error("plane out of range");
+        }
+
+        char const *block_name = get_block_name(codepoint);
+        printf(". Block %s in plane %s", block_name, plane_name);
+
+        if (code_point_info != unicode_code_points.end()) {
+          printf(" (%s)", code_point_info->second.name);
+          char const *category_description =
+              general_category_description(code_point_info->second.category);
+          printf(". Category: %s", category_description);
+        }
+      }
+      if (this->wcwidth) {
+        printf(". wcwidth=%d", wcwidth_value);
+      }
+      printf("\n");
+    } else if (this->output_format == output_format_t::UTF8) {
+      uint8_t utf8_buffer[5];
+      int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
+      utf8_buffer[utf8_byte_count] = 0;
+      printf("%s", utf8_buffer);
+      fflush(stdout);
+    } else if (output_format == output_format_t::UTF16BE ||
+               output_format == output_format_t::UTF16LE) {
+      uint8_t output[5];
+      int output_length = 2;
+      if (codepoint <= 0xFFFF) {
+        encode_utf16(codepoint, output);
+      } else {
+        // Code points from the other planes (called Supplementary Planes) are
+        // encoded in UTF-16 by pairs of 16-bit code units called surrogate
+        // pairs, by the following scheme: (1) 0x010000 is subtracted from the
+        // code point, leaving a 20 bit number in the range 0..0x0FFFFF. (2) The
+        // top ten bits (a number in the range 0..0x03FF) are added to 0xD800 to
+        // give the first code unit or lead surrogate, which will be in the
+        // range 0xD800..0xDBFF. (3) The low ten bits (also in the range
+        // 0..0x03FF) are added to 0xDC00 to give the second code unit or trail
+        // surrogate, which will be in the range 0xDC00..0xDFFF.
+        codepoint -= 0x010000;
+        uint16_t first = (codepoint >> 10) + 0xD800;
+        uint16_t second = (0b1111111111 & codepoint) + 0xDC00;
+        encode_utf16(first, output);
+        encode_utf16(second, output + 2);
+        output_length = 4;
+      }
+      write(STDOUT_FILENO, output, output_length);
+      fflush(stdout);
+    } else if (output_format == output_format_t::UTF32BE ||
+               output_format == output_format_t::UTF32LE) {
+      uint8_t buffer[5];
+      bool little_endian = output_format == output_format_t::UTF32LE;
+      for (int i = 0; i < 4; i++) {
+        int shift = 8 * (little_endian ? i : (3 - i));
+        buffer[i] = (codepoint >> shift) & 0xFF;
+      }
+      write(STDOUT_FILENO, buffer, 4);
+      fflush(stdout);
+    }
+  }
+
+  void flush_normalization_non_starters(std::vector<uint32_t> &non_starters) {
+    std::sort(non_starters.begin(), non_starters.end(),
+              [](uint32_t a, uint32_t b) {
+                auto ac = unicode_code_points[a].canonical_combining_class;
+                auto bc = unicode_code_points[b].canonical_combining_class;
+                return ac < bc;
+              });
+
+    for (auto cp : non_starters) {
+      encode_codepoint(cp, true);
+    }
   }
 
   void note_error(int byte, char const *error_msg, ...) {
@@ -116,7 +260,6 @@ struct program_options_t {
       char const *color_prefix = output_is_terminal ? "\x1B[31m" : "";
       char const *color_suffix = output_is_terminal ? "\x1B[m" : "";
       fprintf(stderr, "%s", color_prefix);
-      // output_formatted_byte(stderr, byte);
       fprintf(stderr, "malformed %" PRIu64 " %s and %" PRIu64 " %s in - ",
               bytes_into_input, (bytes_into_input == 1 ? "byte" : "bytes"),
               codepoints_into_input,
@@ -128,13 +271,19 @@ struct program_options_t {
 
       fprintf(stderr, "%s\n", color_suffix);
       fflush(stderr);
-    } else {
-      if (print_byte_input())
-        output_formatted_byte(stdout, byte);
     }
 
-    if (error_handling == error_handling_t::ABORT) {
+    switch (error_handling) {
+    case error_handling_t::IGNORE:
+      break;
+    case error_handling_t::REPLACE:
+      if (!print_byte_input()) {
+        encode_codepoint(0xFFFD);
+      }
+      break;
+    case error_handling_t::ABORT:
       exit(EX_DATAERR);
+      break;
     }
   }
 
@@ -153,7 +302,6 @@ struct program_options_t {
 
   void print_byte_result(int byte, char const *msg, ...) {
     if (print_byte_input()) {
-      output_formatted_byte(stdout, byte);
       va_list argp;
       va_start(argp, msg);
       vfprintf(stdout, msg, argp);
@@ -228,156 +376,6 @@ int codepoint_to_utf8(uint32_t codePoint, uint8_t *utf8InputBuffer) {
   return bufferPosition;
 }
 
-void encode_codepoint(uint32_t codepoint, program_options_t &program,
-                      bool output_non_starters = false);
-
-void flush_normalization_non_starters(std::vector<uint32_t> &non_starters,
-                                      program_options_t &program) {
-  std::sort(non_starters.begin(), non_starters.end(),
-            [](uint32_t a, uint32_t b) {
-              auto ac = unicode_code_points[a].canonical_combining_class;
-              auto bc = unicode_code_points[b].canonical_combining_class;
-              return ac < bc;
-            });
-
-  for (auto cp : non_starters) {
-    encode_codepoint(cp, program, true);
-  }
-}
-
-void encode_codepoint(uint32_t codepoint, program_options_t &program,
-                      bool output_non_starters) {
-  program.codepoints_into_input++;
-
-  if (program.is_silent_output()) {
-    return;
-  }
-
-  auto code_point_info = unicode_code_points.find(codepoint);
-  if (code_point_info == unicode_code_points.end()) {
-    die_with_internal_error("no such code point: %d", codepoint);
-  }
-
-  if (program.normalization_form != normalization_form_t::NONE) {
-    bool compatible =
-        program.normalization_form == normalization_form_t::NFKC ||
-        program.normalization_form == normalization_form_t::NFKD;
-
-    uint8_t len;
-    uint32_t const *decomposed = unicode_decompose(codepoint, compatible, &len);
-    if (len == 0) {
-      if (!output_non_starters) {
-        bool is_starter =
-            code_point_info->second.canonical_combining_class == 0;
-        if (is_starter) {
-          std::vector<uint32_t> non_starters_copy =
-              program.normalization_non_starters;
-          program.normalization_non_starters.clear();
-
-          flush_normalization_non_starters(non_starters_copy, program);
-        } else {
-          program.normalization_non_starters.push_back(codepoint);
-          return;
-        }
-      }
-    } else {
-      // TODO: Recursive decomposition
-      for (uint8_t i = 0; i < len; i++) {
-        encode_codepoint(decomposed[i], program, true);
-      }
-      return;
-    }
-  }
-
-  if (program.output_format == output_format_t::DESCRIPTION_DECODING ||
-      program.output_format == output_format_t::DESCRIPTION_CODEPOINT) {
-    uint8_t utf8_buffer[5];
-    int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
-    utf8_buffer[utf8_byte_count] = 0;
-    int wcwidth_value = wcwidth_musl(codepoint);
-    if (wcwidth_value != -1) {
-      printf("'%s' = ", utf8_buffer);
-    }
-    printf("U+%04X (%s)", codepoint, code_point_info->second.name);
-
-    if (program.block_info) {
-      char const *plane_name = "???";
-      if (codepoint <= 0xFFFF) {
-        plane_name = "0 Basic Multilingual Plane (BMP)";
-      } else if (codepoint <= 0x1FFFF) {
-        plane_name = "1 Supplementary Multilingual Plane (SMP)";
-      } else if (codepoint < 0x2FFFF) {
-        plane_name = "2 Supplementary Ideographic Plane (SIP)";
-      } else if (codepoint <= 0xDFFFF) {
-        plane_name = "*Unassigned*";
-      } else if (codepoint <= 0xEFFFF) {
-        plane_name = "14 Supplement­ary Special-purpose Plane (SSP)";
-      } else if (codepoint <= 0xFFFFD) {
-        plane_name = "15 Supplemental Private Use Area-A (S PUA A)";
-      } else if (codepoint <= 0x10FFFD) {
-        plane_name = "16 Supplemental Private Use Area-B (S PUA B)";
-      } else {
-        die_with_internal_error("plane out of range");
-      }
-
-      char const *block_name = get_block_name(codepoint);
-      printf(". Block %s in plane %s", block_name, plane_name);
-
-      if (code_point_info != unicode_code_points.end()) {
-        printf(" (%s)", code_point_info->second.name);
-        char const *category_description =
-            general_category_description(code_point_info->second.category);
-        printf(". Category: %s", category_description);
-      }
-    }
-    if (program.wcwidth) {
-      printf(". wcwidth=%d", wcwidth_value);
-    }
-    printf("\n");
-  } else if (program.output_format == output_format_t::UTF8) {
-    uint8_t utf8_buffer[5];
-    int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
-    utf8_buffer[utf8_byte_count] = 0;
-    printf("%s", utf8_buffer);
-    fflush(stdout);
-  } else if (program.output_format == output_format_t::UTF16BE ||
-             program.output_format == output_format_t::UTF16LE) {
-    uint8_t output[5];
-    int output_length = 2;
-    if (codepoint <= 0xFFFF) {
-      program.encode_utf16(codepoint, output);
-    } else {
-      // Code points from the other planes (called Supplementary Planes) are
-      // encoded in UTF-16 by pairs of 16-bit code units called surrogate pairs,
-      // by the following scheme: (1) 0x010000 is subtracted from the code
-      // point, leaving a 20 bit number in the range 0..0x0FFFFF. (2) The top
-      // ten bits (a number in the range 0..0x03FF) are added to 0xD800 to give
-      // the first code unit or lead surrogate, which will be in the range
-      // 0xD800..0xDBFF. (3) The low ten bits (also in the range 0..0x03FF) are
-      // added to 0xDC00 to give the second code unit or trail surrogate, which
-      // will be in the range 0xDC00..0xDFFF.
-      codepoint -= 0x010000;
-      uint16_t first = (codepoint >> 10) + 0xD800;
-      uint16_t second = (0b1111111111 & codepoint) + 0xDC00;
-      program.encode_utf16(first, output);
-      program.encode_utf16(second, output + 2);
-      output_length = 4;
-    }
-    write(STDOUT_FILENO, output, output_length);
-    fflush(stdout);
-  } else if (program.output_format == output_format_t::UTF32BE ||
-             program.output_format == output_format_t::UTF32LE) {
-    uint8_t buffer[5];
-    bool little_endian = program.output_format == output_format_t::UTF32LE;
-    for (int i = 0; i < 4; i++) {
-      int shift = 8 * (little_endian ? i : (3 - i));
-      buffer[i] = (codepoint >> shift) & 0xFF;
-    }
-    write(STDOUT_FILENO, buffer, 4);
-    fflush(stdout);
-  }
-}
-
 void process_utf8_byte(uint8_t byte, uint8_t *utf8_buffer, uint8_t &utf8_pos,
                        uint8_t &remaining_utf8_continuation_bytes,
                        program_options_t &options) {
@@ -387,8 +385,7 @@ void process_utf8_byte(uint8_t byte, uint8_t *utf8_buffer, uint8_t &utf8_pos,
     if (invalid_utf8_seq) {
       options.note_error(byte, "expected continuation byte");
     } else {
-      // options.print_byte_result(byte, "single-byte sequence: ");
-      encode_codepoint(byte, options);
+      options.encode_codepoint(byte);
     }
   } else if ((byte & /*0b11000000=*/0xc0) == /*0b10000000=*/0x80) {
     invalid_utf8_seq = (remaining_utf8_continuation_bytes == 0);
@@ -403,20 +400,17 @@ void process_utf8_byte(uint8_t byte, uint8_t *utf8_buffer, uint8_t &utf8_pos,
             utf8_sequence_to_codepoint(utf8_buffer, used_length);
         if (code_point > 0x10FFFF) {
           options.note_error(byte, "code point out of range: %u", code_point);
+        } else if (code_point >= 0xD800 && code_point <= 0xDFFF) {
+          options.note_error(byte, "surrogate %u in UTF-8", code_point);
         } else if (((code_point <= 0x80) && used_length > 1) ||
                    (code_point < 0x800 && used_length > 2) ||
                    (code_point < 0x10000 && used_length > 3)) {
           options.note_error(byte, "overlong encoding of %u using %d bytes",
                              code_point, used_length);
         } else {
-          // options.print_byte_result(byte,
-          //"UTF-8 continuation byte 0b10xxxxxx: ");
-          encode_codepoint(code_point, options);
+          options.encode_codepoint(code_point);
         }
         remaining_utf8_continuation_bytes = 0;
-      } else {
-        // options.print_byte_result(byte, "UTF-8 continuation byte
-        // 0b10xxxxxx\n");
       }
     }
   } else {
@@ -434,14 +428,6 @@ void process_utf8_byte(uint8_t byte, uint8_t *utf8_buffer, uint8_t &utf8_pos,
     }
     if (expect_following != -1) {
       if (remaining_utf8_continuation_bytes == 0) {
-        /*
-options.print_byte_result(
-    byte, "leading %s byte for a %d byte sequence\n",
-    (expect_following == 1)
-        ? "0b110xxxxx"
-        : ((expect_following == 2) ? "0b1110xxxx" : "0b11110xxx"),
-    expect_following + 1);
-                */
         remaining_utf8_continuation_bytes = expect_following;
         utf8_pos = 1;
         utf8_buffer[0] = byte;
@@ -476,7 +462,7 @@ void process_utf16_byte(uint8_t byte, uint8_t *state_buffer, uint8_t &state_pos,
       state_pos = 0;
     } else {
       options.print_byte_result(byte, "single UTF-16 code unit: ");
-      encode_codepoint(codeuint, options);
+      options.encode_codepoint(codeuint);
       state_pos = 0;
     }
   } else if (state_pos == 4) {
@@ -493,7 +479,7 @@ void process_utf16_byte(uint8_t byte, uint8_t *state_buffer, uint8_t &state_pos,
                          (trailing_surrogate - 0xDC00);
     options.print_byte_result(byte, "trailing surrogate %d",
                               trailing_surrogate);
-    encode_codepoint(codepoint, options);
+    options.encode_codepoint(codepoint);
     state_pos = 0;
   } else {
     // options.print_byte_result(byte, "start of UTF-16 code unit\n");
@@ -511,7 +497,7 @@ void process_utf32_byte(uint8_t byte, uint8_t *state_buffer, uint8_t &state_pos,
       codepoint += (state_buffer[i] << shift) & (0xFF << shift);
     }
     options.print_byte_result(byte, "byte 4 of a UTF-32 code unit: ");
-    encode_codepoint(codepoint, options);
+    options.encode_codepoint(codepoint);
     state_pos = 0;
   } else {
     options.print_byte_result(byte, "byte %d of a UTF-32 code unit\n",
@@ -536,7 +522,7 @@ void process_textual_codepoint_byte(uint8_t byte, uint8_t *state_buffer,
         options.note_error(byte, "cannot parse into code point: '%s'",
                            state_buffer);
       } else {
-        encode_codepoint(codepoint, options);
+        options.encode_codepoint(codepoint);
       }
       state_buffer_pos = 0;
     }
@@ -879,7 +865,7 @@ int main(int argc, char **argv) {
 
   read_and_echo(options);
 
-  flush_normalization_non_starters(options.normalization_non_starters, options);
+  options.flush_normalization_non_starters(options.normalization_non_starters);
 
   if (options.print_summary) {
     char const *color_prefix = options.output_is_terminal ? "\x1B[35m" : "";

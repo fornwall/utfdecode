@@ -71,6 +71,16 @@ for line in open("UnicodeData.txt"):
     parts = line.split(';')
     numeric_value = int(parts[0], 16)
 
+    # D800;<Non Private Use High Surrogate, First>;Cs;0;L;;;;;N;;;;;
+    # DB7F;<Non Private Use High Surrogate, Last>;Cs;0;L;;;;;N;;;;;
+    # DB80;<Private Use High Surrogate, First>;Cs;0;L;;;;;N;;;;;
+    # DBFF;<Private Use High Surrogate, Last>;Cs;0;L;;;;;N;;;;;
+    # DC00;<Low Surrogate, First>;Cs;0;L;;;;;N;;;;;
+    # DFFF;<Low Surrogate, Last>;Cs;0;L;;;;;N;;;;;
+    # E000;<Private Use, First>;Co;0;L;;;;;N;;;;;
+    # F8FF;<Private Use, Last>;Co;0;L;;;;;N;;;;;
+    if numeric_value in [0xD800, 0xDB7F, 0xDB80, 0xDBFF, 0xDC00, 0xDFFF, 0xE000, 0xF8FF]: continue
+
     # http://www.unicode.org/reports/tr44/#General_Category_Values
     name = parts[1]
     if name == '<control>' and parts[10]:
