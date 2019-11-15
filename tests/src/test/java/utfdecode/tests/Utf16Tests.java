@@ -20,4 +20,12 @@ class Utf16Tests {
         }
     }
 
+    @Test void encodeSupplemental() {
+        var input = "\uD83D\uDCA9\n";
+
+        for (var outputCharset : List.of(StandardCharsets.UTF_16BE, StandardCharsets.UTF_16LE)) {
+            var output = Utfdecode.getOutput(input, StandardCharsets.UTF_16BE, outputCharset);
+            Assertions.assertEquals(input, output);
+        }
+    }
 }

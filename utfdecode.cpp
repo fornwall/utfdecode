@@ -197,26 +197,7 @@ struct program_options_t {
     } else if (output_format == output_format_t::UTF16BE ||
                output_format == output_format_t::UTF16LE) {
       uint8_t output[5];
-      int output_length = 2;
-      if (codepoint <= 0xFFFF) {
-        encode_utf16(codepoint, output);
-      } else {
-        // Code points from the other planes (called Supplementary Planes) are
-        // encoded in UTF-16 by pairs of 16-bit code units called surrogate
-        // pairs, by the following scheme: (1) 0x010000 is subtracted from the
-        // code point, leaving a 20 bit number in the range 0..0x0FFFFF. (2) The
-        // top ten bits (a number in the range 0..0x03FF) are added to 0xD800 to
-        // give the first code unit or lead surrogate, which will be in the
-        // range 0xD800..0xDBFF. (3) The low ten bits (also in the range
-        // 0..0x03FF) are added to 0xDC00 to give the second code unit or trail
-        // surrogate, which will be in the range 0xDC00..0xDFFF.
-        codepoint -= 0x010000;
-        uint16_t first = (codepoint >> 10) + 0xD800;
-        uint16_t second = (0b1111111111 & codepoint) + 0xDC00;
-        encode_utf16(first, output);
-        encode_utf16(second, output + 2);
-        output_length = 4;
-      }
+      int output_length = encode_utf16(codepoint, output);
       write(STDOUT_FILENO, output, output_length);
       fflush(stdout);
     } else if (output_format == output_format_t::UTF32BE ||
@@ -285,11 +266,28 @@ struct program_options_t {
     exit(exit_status);
   }
 
-  void encode_utf16(uint16_t codeunit, uint8_t *buffer) {
-    bool little_endian = (output_format == output_format_t::UTF16LE);
-    buffer[0] = little_endian ? (codeunit & 0xFF) : (codeunit >> 8);
-    buffer[1] = little_endian ? (codeunit >> 8) : (codeunit & 0xFF);
-    buffer[2] = 0;
+  int encode_utf16(uint32_t codePoint, uint8_t *buffer) {
+    if (codePoint <= 0xFFFF) {
+      bool little_endian = (output_format == output_format_t::UTF16LE);
+      buffer[0] = little_endian ? (codePoint & 0xFF) : (codePoint >> 8);
+      buffer[1] = little_endian ? (codePoint >> 8) : (codePoint & 0xFF);
+      buffer[2] = 0;
+      return 2;
+    } else {
+      // Code points from the other planes (called Supplementary Planes) are
+      // encoded in UTF-16 by pairs of 16-bit code units called surrogate
+      // pairs, by the following scheme: (1) 0x010000 is subtracted from the
+      // code point, leaving a 20 bit number in the range 0..0x0FFFFF. (2) The
+      // top ten bits (a number in the range 0..0x03FF) are added to 0xD800 to
+      // give the first code unit or lead surrogate, which will be in the
+      // range 0xD800..0xDBFF. (3) The low ten bits (also in the range
+      // 0..0x03FF) are added to 0xDC00 to give the second code unit or trail
+      // surrogate, which will be in the range 0xDC00..0xDFFF.
+      codePoint -= 0x010000;
+      uint16_t first = (codePoint >> 10) + 0xD800;
+      uint16_t second = (0b1111111111 & codePoint) + 0xDC00;
+      return encode_utf16(first, buffer) + encode_utf16(second, buffer + 2);
+    }
   }
 
   void print_byte_result(int byte, char const *msg, ...) {
