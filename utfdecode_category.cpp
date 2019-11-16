@@ -1,46 +1,7 @@
 #ifndef GENERAL_CATEGORY_VALUES_HPP_INCLUDED
 #define GENERAL_CATEGORY_VALUES_HPP_INCLUDED
 
-enum class general_category_value_t {
-  Uppercase_Letter,
-  Lowercase_Letter,
-  Titlecase_Letter,
-  Cased_Letter,
-  Modifier_Letter,
-  Other_Letter,
-  Letter,
-  Nonspacing_Mark,
-  Spacing_Mark,
-  Enclosing_Mark,
-  Mark,
-  Decimal_Number,
-  Letter_Number,
-  Other_Number,
-  Number,
-  Connector_Punctuation,
-  Dash_Punctuation,
-  Open_Punctuation,
-  Close_Punctuation,
-  Initial_Punctuation,
-  Final_Punctuation,
-  Other_Punctuation,
-  Punctuation,
-  Math_Symbol,
-  Currency_Symbol,
-  Modifier_Symbol,
-  Other_Symbol,
-  Symbol,
-  Space_Separator,
-  Line_Separator,
-  Paragraph_Separator,
-  Separator,
-  Control,
-  Format,
-  Surrogate,
-  Private_Use,
-  Unassigned,
-  Other
-};
+#include "utfdecode.hpp"
 
 char const *general_category_description(general_category_value_t category) {
   switch (category) {

@@ -1,67 +1,4 @@
-#define __STDC_FORMAT_MACROS
-#define _XOPEN_SOURCE
-
-#include <fcntl.h>
-#include <getopt.h>
-#include <inttypes.h>
-#include <locale.h>
-#include <stdarg.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/time.h>
-#include <sysexits.h>
-#include <termios.h>
-#include <unistd.h>
-#include <wchar.h>
-
-#include <algorithm>
-#include <vector>
-
-#include "config.h"
-
-#include "musl/wcwidth_musl.h"
-#include "normalization.hpp"
-#include "unicode_blocks.hpp"
-#include "unicode_code_points.hpp"
-#include "unicode_decomposition.hpp"
-
-enum class input_format_t {
-  UTF8,
-  UTF16BE,
-  UTF16LE,
-  UTF32LE,
-  UTF32BE,
-  TEXTUAL_CODEPOINT
-};
-
-enum class output_format_t {
-  UTF8,
-  UTF16BE,
-  UTF16LE,
-  UTF32LE,
-  UTF32BE,
-  DESCRIPTION_CODEPOINT,
-  DESCRIPTION_DECODING,
-  SILENT
-};
-
-enum class error_handling_t { ABORT, REPLACE, IGNORE };
-
-enum class error_reporting_t { REPORT_STDERR, SILENT };
-
-void die_with_internal_error [[noreturn]] (char const *fmt, ...) {
-  fprintf(stderr, "utfdecode: internal error - ");
-  va_list argp;
-  va_start(argp, fmt);
-  vfprintf(stderr, fmt, argp);
-  va_end(argp);
-  fprintf(stderr, "\n");
-  exit(EX_SOFTWARE);
-}
-
-int codepoint_to_utf8(uint32_t codePoint, uint8_t *utf8InputBuffer);
+#include "utfdecode.hpp"
 
 struct program_options_t {
   input_format_t input_format{input_format_t::UTF8};
@@ -106,10 +43,7 @@ struct program_options_t {
       return;
     }
 
-    auto code_point_info = unicode_code_points.find(codepoint);
-    if (code_point_info == unicode_code_points.end()) {
-      die_with_internal_error("no such code point: %d", codepoint);
-    }
+    auto code_point_info = lookup_code_point(codepoint);
 
     if (this->normalization_form != normalization_form_t::NONE) {
       bool compatible =
@@ -122,7 +56,7 @@ struct program_options_t {
       if (len == 0) {
         if (!output_non_starters) {
           bool is_starter =
-              code_point_info->second.canonical_combining_class == 0;
+              code_point_info->canonical_combining_class == 0;
           if (is_starter) {
             std::vector<uint32_t> non_starters_copy =
                 this->normalization_non_starters;
@@ -152,7 +86,7 @@ struct program_options_t {
       if (wcwidth_value != -1) {
         printf("'%s' = ", utf8_buffer);
       }
-      printf("U+%04X (%s)", codepoint, code_point_info->second.name);
+      printf("U+%04X (%s)", codepoint, code_point_info->name);
 
       if (this->block_info) {
         char const *plane_name = "???";
@@ -177,12 +111,10 @@ struct program_options_t {
         char const *block_name = get_block_name(codepoint);
         printf(". Block %s in plane %s", block_name, plane_name);
 
-        if (code_point_info != unicode_code_points.end()) {
-          printf(" (%s)", code_point_info->second.name);
-          char const *category_description =
-              general_category_description(code_point_info->second.category);
-          printf(". Category: %s", category_description);
-        }
+		printf(" (%s)", code_point_info->name);
+		char const *category_description =
+			general_category_description(code_point_info->category);
+		printf(". Category: %s", category_description);
       }
       if (this->wcwidth) {
         printf(". wcwidth=%d", wcwidth_value);
@@ -197,7 +129,8 @@ struct program_options_t {
     } else if (output_format == output_format_t::UTF16BE ||
                output_format == output_format_t::UTF16LE) {
       uint8_t output[5];
-      int output_length = encode_utf16(codepoint, output);
+	  bool little_endian = output_format == output_format_t::UTF16LE;
+      int output_length = encode_utf16(codepoint, output, little_endian);
       write(STDOUT_FILENO, output, output_length);
       fflush(stdout);
     } else if (output_format == output_format_t::UTF32BE ||
@@ -216,8 +149,8 @@ struct program_options_t {
   void flush_normalization_non_starters(std::vector<uint32_t> &non_starters) {
     std::sort(non_starters.begin(), non_starters.end(),
               [](uint32_t a, uint32_t b) {
-                auto ac = unicode_code_points[a].canonical_combining_class;
-                auto bc = unicode_code_points[b].canonical_combining_class;
+                auto ac = lookup_code_point(a)->canonical_combining_class;
+                auto bc = lookup_code_point(b)->canonical_combining_class;
                 return ac < bc;
               });
 
@@ -264,30 +197,6 @@ struct program_options_t {
     if (input_is_terminal)
       tcsetattr(0, TCSANOW, &vt_orig);
     exit(exit_status);
-  }
-
-  int encode_utf16(uint32_t codePoint, uint8_t *buffer) {
-    if (codePoint <= 0xFFFF) {
-      bool little_endian = (output_format == output_format_t::UTF16LE);
-      buffer[0] = little_endian ? (codePoint & 0xFF) : (codePoint >> 8);
-      buffer[1] = little_endian ? (codePoint >> 8) : (codePoint & 0xFF);
-      buffer[2] = 0;
-      return 2;
-    } else {
-      // Code points from the other planes (called Supplementary Planes) are
-      // encoded in UTF-16 by pairs of 16-bit code units called surrogate
-      // pairs, by the following scheme: (1) 0x010000 is subtracted from the
-      // code point, leaving a 20 bit number in the range 0..0x0FFFFF. (2) The
-      // top ten bits (a number in the range 0..0x03FF) are added to 0xD800 to
-      // give the first code unit or lead surrogate, which will be in the
-      // range 0xD800..0xDBFF. (3) The low ten bits (also in the range
-      // 0..0x03FF) are added to 0xDC00 to give the second code unit or trail
-      // surrogate, which will be in the range 0xDC00..0xDFFF.
-      codePoint -= 0x010000;
-      uint16_t first = (codePoint >> 10) + 0xD800;
-      uint16_t second = (0b1111111111 & codePoint) + 0xDC00;
-      return encode_utf16(first, buffer) + encode_utf16(second, buffer + 2);
-    }
   }
 
   void print_byte_result(int byte, char const *msg, ...) {
