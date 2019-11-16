@@ -3,6 +3,7 @@ AM_CXXFLAGS = -Wall -Wextra -std=c++14 -pedantic
 bin_PROGRAMS = utfdecode
 
 utfdecode_SOURCES = utfdecode.cpp \
+					utfdecode_main.cpp \
 					utfdecode_utf16.cpp \
 					utfdecode.hpp \
 					utfdecode_decompose.cpp \

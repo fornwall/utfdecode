@@ -247,16 +247,15 @@ int codepoint_to_utf8(uint32_t codePoint, uint8_t *utf8InputBuffer) {
   return bufferPosition;
 }
 
-void process_utf8_byte(uint8_t byte, uint8_t *utf8_buffer, uint8_t &utf8_pos,
-                       uint8_t &remaining_utf8_continuation_bytes,
-                       program_options_t &options) {
+void program_options_t::process_utf8_byte(uint8_t byte, uint8_t *utf8_buffer, uint8_t &utf8_pos,
+                       uint8_t &remaining_utf8_continuation_bytes) {
   bool invalid_utf8_seq = false;
   if (byte <= 127) {
     invalid_utf8_seq = (remaining_utf8_continuation_bytes > 0);
     if (invalid_utf8_seq) {
-      options.note_error(byte, "expected continuation byte");
+      note_error(byte, "expected continuation byte");
     } else {
-      options.encode_codepoint(byte);
+      encode_codepoint(byte);
     }
   } else if ((byte & /*0b11000000=*/0xc0) == /*0b10000000=*/0x80) {
     invalid_utf8_seq = (remaining_utf8_continuation_bytes == 0);
@@ -270,16 +269,16 @@ void process_utf8_byte(uint8_t byte, uint8_t *utf8_buffer, uint8_t &utf8_pos,
         uint32_t code_point =
             utf8_sequence_to_codepoint(utf8_buffer, used_length);
         if (code_point > 0x10FFFF) {
-          options.note_error(byte, "code point out of range: %u", code_point);
+          note_error(byte, "code point out of range: %u", code_point);
         } else if (code_point >= 0xD800 && code_point <= 0xDFFF) {
-          options.note_error(byte, "surrogate %u in UTF-8", code_point);
+          note_error(byte, "surrogate %u in UTF-8", code_point);
         } else if (((code_point <= 0x80) && used_length > 1) ||
                    (code_point < 0x800 && used_length > 2) ||
                    (code_point < 0x10000 && used_length > 3)) {
-          options.note_error(byte, "overlong encoding of %u using %d bytes",
+          note_error(byte, "overlong encoding of %u using %d bytes",
                              code_point, used_length);
         } else {
-          options.encode_codepoint(code_point);
+          encode_codepoint(code_point);
         }
         remaining_utf8_continuation_bytes = 0;
       }
@@ -295,7 +294,7 @@ void process_utf8_byte(uint8_t byte, uint8_t *utf8_buffer, uint8_t &utf8_pos,
     } else {
       expect_following = -1;
       invalid_utf8_seq = true;
-      options.note_error(byte, "invalid UTF-8 byte");
+      note_error(byte, "invalid UTF-8 byte");
     }
     if (expect_following != -1) {
       if (remaining_utf8_continuation_bytes == 0) {
@@ -316,69 +315,63 @@ void process_utf8_byte(uint8_t byte, uint8_t *utf8_buffer, uint8_t &utf8_pos,
   }
 }
 
-void process_utf16_byte(uint8_t byte, uint8_t *state_buffer, uint8_t &state_pos,
-                        program_options_t &options) {
+void program_options_t::process_utf16_byte(uint8_t byte, uint8_t *state_buffer, uint8_t &state_pos) {
   state_buffer[state_pos++] = byte;
   if (state_pos == 2) {
     uint16_t codeuint =
-        (options.input_format == input_format_t::UTF16LE)
+        (input_format == input_format_t::UTF16LE)
             ? state_buffer[0] + (uint16_t(state_buffer[1]) << 8)
             : state_buffer[1] + (uint16_t(state_buffer[0]) << 8);
     if (codeuint >= 0xD800 && codeuint <= 0xDBFF) {
-      options.print_byte_result(byte, "leading surrogate %d\n", codeuint);
+      print_byte_result(byte, "leading surrogate %d\n", codeuint);
     } else if (codeuint >= 0xDC00 && codeuint <= 0xDFFF) {
-      options.note_error(
+      note_error(
           byte, "trailing surrogate %d without leading surrogate before",
           codeuint);
       state_pos = 0;
     } else {
-      options.print_byte_result(byte, "single UTF-16 code unit: ");
-      options.encode_codepoint(codeuint);
+      print_byte_result(byte, "single UTF-16 code unit: ");
+      encode_codepoint(codeuint);
       state_pos = 0;
     }
   } else if (state_pos == 4) {
     uint16_t leading_surrogate =
-        (options.input_format == input_format_t::UTF16LE)
+        (input_format == input_format_t::UTF16LE)
             ? state_buffer[0] + (uint16_t(state_buffer[1]) << 8)
             : state_buffer[1] + (uint16_t(state_buffer[0]) << 8);
     uint16_t trailing_surrogate =
-        (options.input_format == input_format_t::UTF16LE)
+        (input_format == input_format_t::UTF16LE)
             ? state_buffer[2] + (uint16_t(state_buffer[3]) << 8)
             : state_buffer[3] + (uint16_t(state_buffer[2]) << 8);
     uint32_t codepoint = 0x010000 +
                          (uint32_t(leading_surrogate - 0xD800) << 10) +
                          (trailing_surrogate - 0xDC00);
-    options.print_byte_result(byte, "trailing surrogate %d",
+    print_byte_result(byte, "trailing surrogate %d",
                               trailing_surrogate);
-    options.encode_codepoint(codepoint);
+    encode_codepoint(codepoint);
     state_pos = 0;
-  } else {
-    // options.print_byte_result(byte, "start of UTF-16 code unit\n");
   }
 }
 
-void process_utf32_byte(uint8_t byte, uint8_t *state_buffer, uint8_t &state_pos,
-                        program_options_t &options) {
+void program_options_t::process_utf32_byte(uint8_t byte, uint8_t *state_buffer, uint8_t &state_pos) {
   state_buffer[state_pos++] = byte;
   if (state_pos == 4) {
     uint32_t codepoint = 0;
     for (int i = 0; i < 4; i++) {
       int shift =
-          8 * ((options.input_format == input_format_t::UTF32LE) ? i : (3 - i));
+          8 * ((input_format == input_format_t::UTF32LE) ? i : (3 - i));
       codepoint += (state_buffer[i] << shift) & (0xFF << shift);
     }
-    options.print_byte_result(byte, "byte 4 of a UTF-32 code unit: ");
-    options.encode_codepoint(codepoint);
+    print_byte_result(byte, "byte 4 of a UTF-32 code unit: ");
+    encode_codepoint(codepoint);
     state_pos = 0;
   } else {
-    options.print_byte_result(byte, "byte %d of a UTF-32 code unit\n",
-                              state_pos);
+    print_byte_result(byte, "byte %d of a UTF-32 code unit\n", state_pos);
   }
 }
 
-void process_textual_codepoint_byte(uint8_t byte, uint8_t *state_buffer,
-                                    uint8_t &state_buffer_pos,
-                                    program_options_t &options) {
+void program_options_t::process_textual_codepoint_byte(uint8_t byte, uint8_t *state_buffer,
+                                    uint8_t &state_buffer_pos) {
   if (byte == '\n' || byte == ' ' || byte == '\r' || byte == '\t') {
     if (state_buffer_pos > 0) {
       if (state_buffer_pos > 2 && state_buffer[0] == 'U' &&
@@ -390,29 +383,29 @@ void process_textual_codepoint_byte(uint8_t byte, uint8_t *state_buffer,
       state_buffer[state_buffer_pos] = 0;
       long codepoint = strtol((char *)state_buffer, NULL, 0);
       if (codepoint == 0) {
-        options.note_error(byte, "cannot parse into code point: '%s'",
+        note_error(byte, "cannot parse into code point: '%s'",
                            state_buffer);
       } else {
-        options.encode_codepoint(codepoint);
+        encode_codepoint(codepoint);
       }
       state_buffer_pos = 0;
     }
   } else if (state_buffer_pos >= 16) {
     state_buffer[state_buffer_pos] = 0;
-    options.note_error(byte, "too large string '%s' - discarding",
+    note_error(byte, "too large string '%s' - discarding",
                        state_buffer);
   } else {
     state_buffer[state_buffer_pos++] = byte;
   }
 }
 
-void read_and_echo(program_options_t &options) {
+void program_options_t::read_and_echo() {
   uint8_t remaining_bytes = 0;
   uint8_t state_buffer_position = 0;
   uint8_t state_buffer[16];
 
   int64_t initial_timestamp = -1;
-  if (options.timestamps) {
+  if (timestamps) {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     initial_timestamp = tv.tv_sec * 1000 + tv.tv_usec / 1000;
@@ -429,17 +422,17 @@ void read_and_echo(program_options_t &options) {
     }
 
     unsigned char *start_of_buffer = read_buffer;
-    if (read_now + options.bytes_into_input < options.byte_skip_offset) {
-      options.bytes_into_input += read_now;
+    if (read_now + bytes_into_input < byte_skip_offset) {
+      bytes_into_input += read_now;
       continue;
-    } else if (options.bytes_into_input < options.byte_skip_offset) {
-      int skipping_now = options.byte_skip_offset - options.bytes_into_input;
-      options.bytes_into_input += skipping_now;
+    } else if (bytes_into_input < byte_skip_offset) {
+      int skipping_now = byte_skip_offset - bytes_into_input;
+      bytes_into_input += skipping_now;
       read_now -= skipping_now;
       start_of_buffer = &read_buffer[skipping_now];
     }
 
-    if (options.timestamps) {
+    if (timestamps) {
       struct timeval tv;
       gettimeofday(&tv, NULL);
       long long int elapsed =
@@ -450,33 +443,30 @@ void read_and_echo(program_options_t &options) {
     bool end_of_input = false;
     for (int i = 0; i < read_now; i++) {
       uint8_t c = start_of_buffer[i];
-      if (options.input_is_terminal && (c == 3 || c == 4)) {
+      if (input_is_terminal && (c == 3 || c == 4)) {
         /* Let the user exit on ctrl+c or ctrl+d, or on end of file. */
         end_of_input = true;
         break;
       }
-      switch (options.input_format) {
+      switch (input_format) {
       case input_format_t::UTF8:
         process_utf8_byte(c, state_buffer, state_buffer_position,
-                          remaining_bytes, options);
+                          remaining_bytes);
         break;
       case input_format_t::UTF16BE:
       case input_format_t::UTF16LE:
-        process_utf16_byte(c, state_buffer, state_buffer_position, options);
+        process_utf16_byte(c, state_buffer, state_buffer_position);
         break;
       case input_format_t::UTF32BE:
       case input_format_t::UTF32LE:
-        process_utf32_byte(c, state_buffer, state_buffer_position, options);
+        process_utf32_byte(c, state_buffer, state_buffer_position);
         break;
       case input_format_t::TEXTUAL_CODEPOINT:
-        process_textual_codepoint_byte(c, state_buffer, state_buffer_position,
-                                       options);
+        process_textual_codepoint_byte(c, state_buffer, state_buffer_position);
         break;
       }
-      options.bytes_into_input++;
-      if (options.byte_skip_limit != 0 &&
-          ((options.byte_skip_limit + options.byte_skip_offset) <=
-           options.bytes_into_input)) {
+      bytes_into_input++;
+      if (byte_skip_limit != 0 && ((byte_skip_limit + byte_skip_offset) <= bytes_into_input)) {
         end_of_input = true;
         break;
       }
@@ -487,274 +477,3 @@ void read_and_echo(program_options_t &options) {
   }
 }
 
-void print_usage_and_exit(char const *program_name, int exit_status) {
-  fprintf(
-      stderr,
-      "usage: %s [OPTIONS] [file]\n"
-      "  -b, --block-info             Show block and plane information. Only "
-      "relevant if using the 'decoding' format\n"
-      "  -d, --decode-format FORMAT   Determine how input should be "
-      "decoded:\n"
-      "                               * codepoint - decode input as "
-      "textual U+XXXX descriptions\n"
-      "                               * utf8 (default) - decode input as "
-      "UTF-8\n"
-      "                               * utf16le - decode input as "
-      "UTF-16, little endian encoded\n"
-      "                               * utf16be - decode input as "
-      "UTF-16, big endian encoded\n"
-      "                               * utf32le - decode input as "
-      "UTF-32, little endian encoded\n"
-      "                               * utf32be - decode input as "
-      "UTF-32, big endian encoded\n"
-      "  -e, --encode-format FORMAT   Determine how output should encoded. "
-      "Accepts same as the above decoding formats and adds:\n"
-      "                               * decoding (default) - debug "
-      "output of the complete decoding process\n"
-      "                               * silent - no output\n"
-      "  -h, --help                   Show this help and exit\n"
-      "  -l, --limit LIMIT            Only decode up to the specified amount "
-      "of bytes\n"
-      "  -m, --malformed <ACTION>     Determine what should happen on "
-      "decoding error:\n"
-      "                               * abort - abort the program "
-      "directly with exit value 65\n"
-      "                               * ignore - ignore invalid input\n"
-      "                               * replace (default) - replace with "
-      "the unicode replacement character � (U+FFFD)\n"
-      "                               Note that errors are also logged to "
-      "stderr unless -q is specified\n"
-      "  -n, --normalization <FORM>   Specify normalization form to use: "
-      "NFD, NFC, NFKD or NFKC\n"
-      "  -o, --offset <OFFSET>        Skip the specified amount of bytes "
-      "before starting decoding\n"
-      "  -q, --quiet-errors           Do not log decoding errors to stderr\n"
-      "  -s, --summary                Show a summary at end of input\n"
-      "  -t, --timestamps             Show a timestamp after each input "
-      "read\n"
-      "  -w, --wcwidth                Show information about the wcwidth "
-      "property for 'decoding'\n",
-      program_name);
-  exit(exit_status);
-}
-
-int main(int argc, char **argv) {
-  setlocale(LC_ALL, NULL);
-  program_options_t options;
-  struct option getopt_options[] = {
-      {"block-info", no_argument, nullptr, 'b'},
-      {"encode-format", required_argument, nullptr, 'e'},
-      {"decode-format", required_argument, nullptr, 'd'},
-      {"help", no_argument, nullptr, 'h'},
-      {"limit", required_argument, nullptr, 'l'},
-      {"malformed", required_argument, nullptr, 'm'},
-      {"normalization", required_argument, nullptr, 'n'},
-      {"offset", required_argument, nullptr, 'o'},
-      {"quiet-errors", no_argument, nullptr, 'q'},
-      {"summary", no_argument, nullptr, 's'},
-      {"timestamps", no_argument, nullptr, 't'},
-      {"version", no_argument, nullptr, 'v'},
-      {"wcwidth", no_argument, nullptr, 'w'},
-      {0, 0, 0, 0}};
-
-  while (true) {
-    int option_index = 0;
-    int c = getopt_long(argc, argv, "bd:e:hl:m:n:o:qstvw", getopt_options,
-                        &option_index);
-    if (c == -1)
-      break;
-    bool print_error_and_exit = false;
-    int exit_status = EX_USAGE;
-    switch (c) {
-    case 'b':
-      options.block_info = true;
-      break;
-    case 'd':
-      if (strcmp(optarg, "utf8") == 0) {
-        options.input_format = input_format_t::UTF8;
-      } else if (strcmp(optarg, "utf16le") == 0 ||
-                 strcmp(optarg, "utf16-le") == 0 ||
-                 strcmp(optarg, "utf16") == 0 ||
-                 strcmp(optarg, "utf-16") == 0) {
-        options.input_format = input_format_t::UTF16LE;
-      } else if (strcmp(optarg, "utf16be") == 0 ||
-                 strcmp(optarg, "utf16-be") == 0) {
-        options.input_format = input_format_t::UTF16BE;
-      } else if (strcmp(optarg, "utf32le") == 0 ||
-                 strcmp(optarg, "utf32-le") == 0 ||
-                 strcmp(optarg, "utf32") == 0 ||
-                 strcmp(optarg, "utf-32") == 0) {
-        options.input_format = input_format_t::UTF32LE;
-      } else if (strcmp(optarg, "utf32be") == 0 ||
-                 strcmp(optarg, "utf32-be") == 0) {
-        options.input_format = input_format_t::UTF32BE;
-      } else if (strcmp(optarg, "codepoint") == 0) {
-        options.input_format = input_format_t::TEXTUAL_CODEPOINT;
-      } else {
-        fprintf(stderr, "'%s' is not a valid decode format\n", optarg);
-        print_error_and_exit = true;
-      }
-      break;
-    case 'e':
-      if (strcmp(optarg, "codepoint") == 0) {
-        options.output_format = output_format_t::DESCRIPTION_CODEPOINT;
-      } else if (strcmp(optarg, "decoding") == 0) {
-        options.output_format = output_format_t::DESCRIPTION_DECODING;
-      } else if (strcmp(optarg, "utf8") == 0) {
-        options.output_format = output_format_t::UTF8;
-      } else if (strcmp(optarg, "utf16le") == 0 ||
-                 strcmp(optarg, "utf16-le") == 0 ||
-                 strcmp(optarg, "utf16") == 0 ||
-                 strcmp(optarg, "utf-16") == 0) {
-        options.output_format = output_format_t::UTF16LE;
-      } else if (strcmp(optarg, "utf16be") == 0 ||
-                 strcmp(optarg, "utf16-be") == 0) {
-        options.output_format = output_format_t::UTF16BE;
-      } else if (strcmp(optarg, "utf32le") == 0 ||
-                 strcmp(optarg, "utf32-le") == 0 ||
-                 strcmp(optarg, "utf32") == 0 ||
-                 strcmp(optarg, "utf-32") == 0) {
-        options.output_format = output_format_t::UTF32LE;
-      } else if (strcmp(optarg, "utf32be") == 0 ||
-                 strcmp(optarg, "utf32-be") == 0) {
-        options.output_format = output_format_t::UTF32BE;
-      } else if (strcmp(optarg, "silent") == 0) {
-        options.output_format = output_format_t::SILENT;
-      } else {
-        fprintf(stderr, "'%s' is not a valid encode format\n", optarg);
-        print_error_and_exit = true;
-      }
-      break;
-    case 'h':
-      exit_status = EX_OK;
-      print_error_and_exit = true;
-      break;
-    case 'l':
-      options.byte_skip_limit = atoi(optarg);
-      if (options.byte_skip_limit == 0) {
-        fprintf(stderr, "'%s' is not a valid byte limit\n", optarg);
-        print_error_and_exit = true;
-      }
-      break;
-    case 'm':
-      if (strcmp(optarg, "ignore") == 0) {
-        options.error_handling = error_handling_t::IGNORE;
-      } else if (strcmp(optarg, "replace") == 0) {
-        options.error_handling = error_handling_t::REPLACE;
-        ;
-      } else if (strcmp(optarg, "abort") == 0) {
-        options.error_handling = error_handling_t::ABORT;
-      } else {
-        fprintf(stderr, "'%s' is not a valid error handling\n", optarg);
-        print_error_and_exit = true;
-      }
-      break;
-    case 'n':
-      if (strcmp(optarg, "NFD") == 0 || strcmp(optarg, "nfd") == 0) {
-        options.normalization_form = normalization_form_t::NFD;
-      } else if (strcmp(optarg, "NFC") == 0 || strcmp(optarg, "nfc") == 0) {
-        options.normalization_form = normalization_form_t::NFC;
-      } else if (strcmp(optarg, "NFKD") == 0 || strcmp(optarg, "nfkd") == 0) {
-        options.normalization_form = normalization_form_t::NFKD;
-      } else if (strcmp(optarg, "NFKC") == 0 || strcmp(optarg, "nfkc") == 0) {
-        options.normalization_form = normalization_form_t::NFKC;
-      } else {
-        fprintf(stderr, "'%s' is not a valid normalization form\n", optarg);
-        print_error_and_exit = true;
-      }
-      break;
-    case 'o':
-      options.byte_skip_offset = atoi(optarg);
-      if (options.byte_skip_offset == 0) {
-        fprintf(stderr, "'%s' is not a valid byte offset\n", optarg);
-        print_error_and_exit = true;
-      }
-      break;
-    case 'q':
-      options.error_reporting = error_reporting_t::SILENT;
-      break;
-    case 's':
-      options.print_summary = true;
-      break;
-    case 't':
-      options.timestamps = true;
-      break;
-    case 'v':
-      printf("%s\n", PACKAGE_VERSION);
-      return 0;
-      break;
-    case 'w':
-      options.wcwidth = true;
-      break;
-    default:
-      print_error_and_exit = true;
-      break;
-    }
-    if (print_error_and_exit)
-      print_usage_and_exit(argv[0], exit_status);
-  }
-
-  if (optind + 1 == argc) {
-    if (strcmp(argv[optind], "-") != 0) {
-      int file_fd = open(argv[optind], O_RDONLY);
-      if (file_fd < 0) {
-        fprintf(stderr, "%s - ", argv[optind]);
-        perror("");
-        return EX_NOINPUT;
-      }
-      if (dup2(file_fd, STDIN_FILENO)) {
-        perror("utfdecode: dup2()");
-        return EX_IOERR;
-      }
-      close(file_fd);
-    }
-  } else if (optind < argc) {
-    print_usage_and_exit(argv[0], EX_USAGE);
-  }
-
-  options.output_is_terminal = isatty(STDOUT_FILENO);
-
-  // If inputting textual code points, do not special case terminal input:
-  options.input_is_terminal =
-      (options.input_format != input_format_t::TEXTUAL_CODEPOINT) &&
-      isatty(STDIN_FILENO);
-
-  if (options.input_is_terminal) {
-    tcgetattr(0, &options.vt_orig);
-    struct termios vt_new = options.vt_orig;
-    // Minimum number of characters for noncanonical read (MIN).
-    vt_new.c_cc[VMIN] = 1;
-    // Timeout in deciseconds for noncanonical read (TIME).
-    vt_new.c_cc[VTIME] = 0;
-    // echo, canonical mode, extended input processing and signal chars off:
-    vt_new.c_lflag &= IEXTEN | ISIG;
-
-    tcsetattr(STDIN_FILENO, TCSANOW, &vt_new);
-  }
-
-  unicode_code_points_initialize();
-
-  read_and_echo(options);
-
-  options.flush_normalization_non_starters(options.normalization_non_starters);
-
-  if (options.print_summary) {
-    char const *color_prefix = options.output_is_terminal ? "\x1B[35m" : "";
-    char const *color_suffix = options.output_is_terminal ? "\x1B[m" : "";
-    uint64_t bytes_encountered =
-        options.bytes_into_input - options.byte_skip_offset;
-    fprintf(stderr,
-            "%s%" PRIu64 " code points from %" PRIu64 " bytes with %" PRIu64
-            " errors%s\n",
-            color_prefix, options.codepoints_into_input, bytes_encountered,
-            options.error_count, color_suffix);
-  } else if (options.output_is_terminal &&
-             options.output_format != output_format_t::DESCRIPTION_CODEPOINT &&
-             options.output_format != output_format_t::DESCRIPTION_DECODING &&
-             options.output_format != output_format_t::SILENT) {
-    printf("\n");
-  }
-
-  int exit_status = options.error_count == 0 ? EX_OK : EX_DATAERR;
-  options.cleanup_and_exit(exit_status);
-}

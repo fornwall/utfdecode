@@ -166,6 +166,18 @@ struct program_options_t {
   void cleanup_and_exit(int exit_status);
 
   void print_byte_result(int byte, char const *msg, ...);
+
+  void process_utf8_byte(uint8_t byte, uint8_t *utf8_buffer, uint8_t &utf8_pos,
+                       uint8_t &remaining_utf8_continuation_bytes);
+
+  void process_utf16_byte(uint8_t byte, uint8_t *state_buffer, uint8_t &state_pos);
+
+  void process_utf32_byte(uint8_t byte, uint8_t *state_buffer, uint8_t &state_pos);
+
+  void process_textual_codepoint_byte(uint8_t byte, uint8_t *state_buffer,
+                                    uint8_t &state_buffer_pos);
+
+  void read_and_echo();
 };
 
 #endif
