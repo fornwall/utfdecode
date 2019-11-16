@@ -1,213 +1,185 @@
 #include "utfdecode.hpp"
 
-struct program_options_t {
-  input_format_t input_format{input_format_t::UTF8};
-  output_format_t output_format{output_format_t::DESCRIPTION_DECODING};
-  error_handling_t error_handling{error_handling_t::REPLACE};
-  error_reporting_t error_reporting{error_reporting_t::REPORT_STDERR};
-  normalization_form_t normalization_form{normalization_form_t::NONE};
-  bool timestamps{false};
-  bool print_summary{false};
-  bool output_is_terminal{false};
-  bool input_is_terminal{false};
-  bool block_info{false};
-  bool wcwidth{false};
+void die_with_internal_error [[noreturn]] (char const *fmt, ...) {
+  fprintf(stderr, "utfdecode: internal error - ");
+  va_list argp;
+  va_start(argp, fmt);
+  vfprintf(stderr, fmt, argp);
+  va_end(argp);
+  fprintf(stderr, "\n");
+  exit(EX_SOFTWARE);
+}
 
-  struct termios vt_orig;
+void program_options_t::encode_codepoint(uint32_t codepoint,
+                                         bool output_non_starters) {
+  this->codepoints_into_input++;
 
-  uint64_t byte_skip_offset{0};
-  uint64_t byte_skip_limit{0};
-  uint64_t bytes_into_input{0};
-  uint64_t codepoints_into_input{0};
-  uint64_t error_count{0};
-
-  std::vector<uint32_t> normalization_non_starters;
-
-  bool print_byte_input() const {
-    return output_format == output_format_t::DESCRIPTION_DECODING &&
-           input_format != input_format_t::TEXTUAL_CODEPOINT;
-  };
-
-  bool is_silent_output() const {
-    return output_format == output_format_t::SILENT;
-  };
-
-  bool is_replace_errors() {
-    return error_handling == error_handling_t::REPLACE;
+  if (this->is_silent_output()) {
+    return;
   }
 
-  void encode_codepoint(uint32_t codepoint, bool output_non_starters = false) {
-    this->codepoints_into_input++;
+  auto code_point_info = lookup_code_point(codepoint);
 
-    if (this->is_silent_output()) {
+  if (this->normalization_form != normalization_form_t::NONE) {
+    bool compatible = this->normalization_form == normalization_form_t::NFKC ||
+                      this->normalization_form == normalization_form_t::NFKD;
+
+    uint8_t len;
+    uint32_t const *decomposed = unicode_decompose(codepoint, compatible, &len);
+    if (len == 0) {
+      if (!output_non_starters) {
+        bool is_starter = code_point_info->canonical_combining_class == 0;
+        if (is_starter) {
+          std::vector<uint32_t> non_starters_copy =
+              this->normalization_non_starters;
+          this->normalization_non_starters.clear();
+
+          flush_normalization_non_starters(non_starters_copy);
+        } else {
+          this->normalization_non_starters.push_back(codepoint);
+          return;
+        }
+      }
+    } else {
+      // TODO: Recursive decomposition
+      for (uint8_t i = 0; i < len; i++) {
+        this->encode_codepoint(decomposed[i], true);
+      }
       return;
     }
+  }
 
-    auto code_point_info = lookup_code_point(codepoint);
+  if (this->output_format == output_format_t::DESCRIPTION_DECODING ||
+      this->output_format == output_format_t::DESCRIPTION_CODEPOINT) {
+    uint8_t utf8_buffer[5];
+    int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
+    utf8_buffer[utf8_byte_count] = 0;
+    int wcwidth_value = wcwidth_musl(codepoint);
+    if (wcwidth_value != -1) {
+      printf("'%s' = ", utf8_buffer);
+    }
+    printf("U+%04X (%s)", codepoint, code_point_info->name);
 
-    if (this->normalization_form != normalization_form_t::NONE) {
-      bool compatible =
-          this->normalization_form == normalization_form_t::NFKC ||
-          this->normalization_form == normalization_form_t::NFKD;
-
-      uint8_t len;
-      uint32_t const *decomposed =
-          unicode_decompose(codepoint, compatible, &len);
-      if (len == 0) {
-        if (!output_non_starters) {
-          bool is_starter =
-              code_point_info->canonical_combining_class == 0;
-          if (is_starter) {
-            std::vector<uint32_t> non_starters_copy =
-                this->normalization_non_starters;
-            this->normalization_non_starters.clear();
-
-            flush_normalization_non_starters(non_starters_copy);
-          } else {
-            this->normalization_non_starters.push_back(codepoint);
-            return;
-          }
-        }
+    if (this->block_info) {
+      char const *plane_name = "???";
+      if (codepoint <= 0xFFFF) {
+        plane_name = "0 Basic Multilingual Plane (BMP)";
+      } else if (codepoint <= 0x1FFFF) {
+        plane_name = "1 Supplementary Multilingual Plane (SMP)";
+      } else if (codepoint < 0x2FFFF) {
+        plane_name = "2 Supplementary Ideographic Plane (SIP)";
+      } else if (codepoint <= 0xDFFFF) {
+        plane_name = "*Unassigned*";
+      } else if (codepoint <= 0xEFFFF) {
+        plane_name = "14 Supplement­ary Special-purpose Plane (SSP)";
+      } else if (codepoint <= 0xFFFFD) {
+        plane_name = "15 Supplemental Private Use Area-A (S PUA A)";
+      } else if (codepoint <= 0x10FFFD) {
+        plane_name = "16 Supplemental Private Use Area-B (S PUA B)";
       } else {
-        // TODO: Recursive decomposition
-        for (uint8_t i = 0; i < len; i++) {
-          this->encode_codepoint(decomposed[i], true);
-        }
-        return;
+        die_with_internal_error("plane out of range");
       }
+
+      char const *block_name = get_block_name(codepoint);
+      printf(". Block %s in plane %s", block_name, plane_name);
+
+      printf(" (%s)", code_point_info->name);
+      char const *category_description =
+          general_category_description(code_point_info->category);
+      printf(". Category: %s", category_description);
     }
-
-    if (this->output_format == output_format_t::DESCRIPTION_DECODING ||
-        this->output_format == output_format_t::DESCRIPTION_CODEPOINT) {
-      uint8_t utf8_buffer[5];
-      int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
-      utf8_buffer[utf8_byte_count] = 0;
-      int wcwidth_value = wcwidth_musl(codepoint);
-      if (wcwidth_value != -1) {
-        printf("'%s' = ", utf8_buffer);
-      }
-      printf("U+%04X (%s)", codepoint, code_point_info->name);
-
-      if (this->block_info) {
-        char const *plane_name = "???";
-        if (codepoint <= 0xFFFF) {
-          plane_name = "0 Basic Multilingual Plane (BMP)";
-        } else if (codepoint <= 0x1FFFF) {
-          plane_name = "1 Supplementary Multilingual Plane (SMP)";
-        } else if (codepoint < 0x2FFFF) {
-          plane_name = "2 Supplementary Ideographic Plane (SIP)";
-        } else if (codepoint <= 0xDFFFF) {
-          plane_name = "*Unassigned*";
-        } else if (codepoint <= 0xEFFFF) {
-          plane_name = "14 Supplement­ary Special-purpose Plane (SSP)";
-        } else if (codepoint <= 0xFFFFD) {
-          plane_name = "15 Supplemental Private Use Area-A (S PUA A)";
-        } else if (codepoint <= 0x10FFFD) {
-          plane_name = "16 Supplemental Private Use Area-B (S PUA B)";
-        } else {
-          die_with_internal_error("plane out of range");
-        }
-
-        char const *block_name = get_block_name(codepoint);
-        printf(". Block %s in plane %s", block_name, plane_name);
-
-		printf(" (%s)", code_point_info->name);
-		char const *category_description =
-			general_category_description(code_point_info->category);
-		printf(". Category: %s", category_description);
-      }
-      if (this->wcwidth) {
-        printf(". wcwidth=%d", wcwidth_value);
-      }
-      printf("\n");
-    } else if (this->output_format == output_format_t::UTF8) {
-      uint8_t utf8_buffer[5];
-      int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
-      utf8_buffer[utf8_byte_count] = 0;
-      printf("%s", utf8_buffer);
-      fflush(stdout);
-    } else if (output_format == output_format_t::UTF16BE ||
-               output_format == output_format_t::UTF16LE) {
-      uint8_t output[5];
-	  bool little_endian = output_format == output_format_t::UTF16LE;
-      int output_length = encode_utf16(codepoint, output, little_endian);
-      write(STDOUT_FILENO, output, output_length);
-      fflush(stdout);
-    } else if (output_format == output_format_t::UTF32BE ||
-               output_format == output_format_t::UTF32LE) {
-      uint8_t buffer[5];
-      bool little_endian = output_format == output_format_t::UTF32LE;
-      for (int i = 0; i < 4; i++) {
-        int shift = 8 * (little_endian ? i : (3 - i));
-        buffer[i] = (codepoint >> shift) & 0xFF;
-      }
-      write(STDOUT_FILENO, buffer, 4);
-      fflush(stdout);
+    if (this->wcwidth) {
+      printf(". wcwidth=%d", wcwidth_value);
     }
+    printf("\n");
+  } else if (this->output_format == output_format_t::UTF8) {
+    uint8_t utf8_buffer[5];
+    int utf8_byte_count = codepoint_to_utf8(codepoint, utf8_buffer);
+    utf8_buffer[utf8_byte_count] = 0;
+    printf("%s", utf8_buffer);
+    fflush(stdout);
+  } else if (output_format == output_format_t::UTF16BE ||
+             output_format == output_format_t::UTF16LE) {
+    uint8_t output[5];
+    bool little_endian = output_format == output_format_t::UTF16LE;
+    int output_length = encode_utf16(codepoint, output, little_endian);
+    write(STDOUT_FILENO, output, output_length);
+    fflush(stdout);
+  } else if (output_format == output_format_t::UTF32BE ||
+             output_format == output_format_t::UTF32LE) {
+    uint8_t buffer[5];
+    bool little_endian = output_format == output_format_t::UTF32LE;
+    for (int i = 0; i < 4; i++) {
+      int shift = 8 * (little_endian ? i : (3 - i));
+      buffer[i] = (codepoint >> shift) & 0xFF;
+    }
+    write(STDOUT_FILENO, buffer, 4);
+    fflush(stdout);
+  }
+}
+
+void program_options_t::flush_normalization_non_starters(
+    std::vector<uint32_t> &non_starters) {
+  std::sort(non_starters.begin(), non_starters.end(),
+            [](uint32_t a, uint32_t b) {
+              auto ac = lookup_code_point(a)->canonical_combining_class;
+              auto bc = lookup_code_point(b)->canonical_combining_class;
+              return ac < bc;
+            });
+
+  for (auto cp : non_starters) {
+    encode_codepoint(cp, true);
+  }
+}
+
+void program_options_t::note_error(int byte, char const *error_msg, ...) {
+  error_count++;
+  if (error_reporting == error_reporting_t::REPORT_STDERR) {
+    fflush(stdout);
+    char const *color_prefix = output_is_terminal ? "\x1B[31m" : "";
+    char const *color_suffix = output_is_terminal ? "\x1B[m" : "";
+    fprintf(stderr, "%s", color_prefix);
+    fprintf(stderr, "malformed %" PRIu64 " %s and %" PRIu64 " %s in - ",
+            bytes_into_input, (bytes_into_input == 1 ? "byte" : "bytes"),
+            codepoints_into_input,
+            codepoints_into_input == 1 ? "character" : "characters");
+    va_list argp;
+    va_start(argp, error_msg);
+    vfprintf(stderr, error_msg, argp);
+    va_end(argp);
+
+    fprintf(stderr, "%s\n", color_suffix);
+    fflush(stderr);
   }
 
-  void flush_normalization_non_starters(std::vector<uint32_t> &non_starters) {
-    std::sort(non_starters.begin(), non_starters.end(),
-              [](uint32_t a, uint32_t b) {
-                auto ac = lookup_code_point(a)->canonical_combining_class;
-                auto bc = lookup_code_point(b)->canonical_combining_class;
-                return ac < bc;
-              });
-
-    for (auto cp : non_starters) {
-      encode_codepoint(cp, true);
+  switch (error_handling) {
+  case error_handling_t::IGNORE:
+    break;
+  case error_handling_t::REPLACE:
+    if (!print_byte_input()) {
+      encode_codepoint(0xFFFD);
     }
+    break;
+  case error_handling_t::ABORT:
+    exit(EX_DATAERR);
+    break;
   }
+}
 
-  void note_error(int byte, char const *error_msg, ...) {
-    error_count++;
-    if (error_reporting == error_reporting_t::REPORT_STDERR) {
-      fflush(stdout);
-      char const *color_prefix = output_is_terminal ? "\x1B[31m" : "";
-      char const *color_suffix = output_is_terminal ? "\x1B[m" : "";
-      fprintf(stderr, "%s", color_prefix);
-      fprintf(stderr, "malformed %" PRIu64 " %s and %" PRIu64 " %s in - ",
-              bytes_into_input, (bytes_into_input == 1 ? "byte" : "bytes"),
-              codepoints_into_input,
-              codepoints_into_input == 1 ? "character" : "characters");
-      va_list argp;
-      va_start(argp, error_msg);
-      vfprintf(stderr, error_msg, argp);
-      va_end(argp);
+void program_options_t::cleanup_and_exit(int exit_status) {
+  if (input_is_terminal)
+    tcsetattr(0, TCSANOW, &vt_orig);
+  exit(exit_status);
+}
 
-      fprintf(stderr, "%s\n", color_suffix);
-      fflush(stderr);
-    }
-
-    switch (error_handling) {
-    case error_handling_t::IGNORE:
-      break;
-    case error_handling_t::REPLACE:
-      if (!print_byte_input()) {
-        encode_codepoint(0xFFFD);
-      }
-      break;
-    case error_handling_t::ABORT:
-      exit(EX_DATAERR);
-      break;
-    }
+void program_options_t::print_byte_result(int byte, char const *msg, ...) {
+  if (print_byte_input()) {
+    va_list argp;
+    va_start(argp, msg);
+    vfprintf(stdout, msg, argp);
+    va_end(argp);
   }
-
-  void cleanup_and_exit(int exit_status) {
-    if (input_is_terminal)
-      tcsetattr(0, TCSANOW, &vt_orig);
-    exit(exit_status);
-  }
-
-  void print_byte_result(int byte, char const *msg, ...) {
-    if (print_byte_input()) {
-      va_list argp;
-      va_start(argp, msg);
-      vfprintf(stdout, msg, argp);
-      va_end(argp);
-    }
-  }
-};
+}
 
 /* Assumes that the buffer is already validated. Does not handle overlong
  * encodings. */

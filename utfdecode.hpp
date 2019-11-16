@@ -76,14 +76,14 @@ enum class general_category_value_t {
 };
 
 struct code_point {
-    uint32_t numeric_value;
-    char const* name;
-    general_category_value_t category;
-    uint8_t canonical_combining_class;
-    bool bidi_mirrored;
-    uint32_t simple_uppercase_mapping;
-    uint32_t simple_lowercase_mapping;
-    uint32_t simple_titlecase_mapping;
+  uint32_t numeric_value;
+  char const *name;
+  general_category_value_t category;
+  uint8_t canonical_combining_class;
+  bool bidi_mirrored;
+  uint32_t simple_uppercase_mapping;
+  uint32_t simple_lowercase_mapping;
+  uint32_t simple_titlecase_mapping;
 };
 
 enum class input_format_t {
@@ -110,22 +110,62 @@ enum class error_handling_t { ABORT, REPLACE, IGNORE };
 
 enum class error_reporting_t { REPORT_STDERR, SILENT };
 
-static void die_with_internal_error [[noreturn]] (char const *fmt, ...) {
-  fprintf(stderr, "utfdecode: internal error - ");
-  va_list argp;
-  va_start(argp, fmt);
-  vfprintf(stderr, fmt, argp);
-  va_end(argp);
-  fprintf(stderr, "\n");
-  exit(EX_SOFTWARE);
-}
+void die_with_internal_error [[noreturn]] (char const *fmt, ...);
 
 void unicode_code_points_initialize();
-code_point const* lookup_code_point(uint32_t);
-uint32_t const* unicode_decompose(uint32_t codePoint, bool compatible, uint8_t* len);
+code_point const *lookup_code_point(uint32_t);
+uint32_t const *unicode_decompose(uint32_t codePoint, bool compatible,
+                                  uint8_t *len);
 int codepoint_to_utf8(uint32_t codePoint, uint8_t *utf8InputBuffer);
 int encode_utf16(uint32_t codePoint, uint8_t *buffer, bool little_endian);
 char const *general_category_description(general_category_value_t category);
-char const* get_block_name(uint32_t codepoint);
+char const *get_block_name(uint32_t codepoint);
+
+struct program_options_t {
+  input_format_t input_format{input_format_t::UTF8};
+  output_format_t output_format{output_format_t::DESCRIPTION_DECODING};
+  error_handling_t error_handling{error_handling_t::REPLACE};
+  error_reporting_t error_reporting{error_reporting_t::REPORT_STDERR};
+  normalization_form_t normalization_form{normalization_form_t::NONE};
+  bool timestamps{false};
+  bool print_summary{false};
+  bool output_is_terminal{false};
+  bool input_is_terminal{false};
+  bool block_info{false};
+  bool wcwidth{false};
+
+  struct termios vt_orig;
+
+  uint64_t byte_skip_offset{0};
+  uint64_t byte_skip_limit{0};
+  uint64_t bytes_into_input{0};
+  uint64_t codepoints_into_input{0};
+  uint64_t error_count{0};
+
+  std::vector<uint32_t> normalization_non_starters;
+
+  bool print_byte_input() const {
+    return output_format == output_format_t::DESCRIPTION_DECODING &&
+           input_format != input_format_t::TEXTUAL_CODEPOINT;
+  };
+
+  bool is_silent_output() const {
+    return output_format == output_format_t::SILENT;
+  };
+
+  bool is_replace_errors() {
+    return error_handling == error_handling_t::REPLACE;
+  }
+
+  void encode_codepoint(uint32_t codepoint, bool output_non_starters = false);
+
+  void flush_normalization_non_starters(std::vector<uint32_t> &non_starters);
+
+  void note_error(int byte, char const *error_msg, ...);
+
+  void cleanup_and_exit(int exit_status);
+
+  void print_byte_result(int byte, char const *msg, ...);
+};
 
 #endif
