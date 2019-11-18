@@ -2,4 +2,4 @@
 
 aclocal
 automake --add-missing
-autoreconf
+autoreconf -i

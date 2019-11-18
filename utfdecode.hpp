@@ -20,6 +20,7 @@
 #include <wchar.h>
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 #include "config.h"
@@ -77,7 +78,7 @@ enum class general_category_value_t {
 
 struct code_point {
   uint32_t numeric_value;
-  char const *name;
+  char const* name;
   general_category_value_t category;
   uint8_t canonical_combining_class;
   bool bidi_mirrored;
@@ -113,12 +114,22 @@ enum class error_reporting_t { REPORT_STDERR, SILENT };
 void die_with_internal_error [[noreturn]] (char const *fmt, ...);
 
 void unicode_code_points_initialize();
+
 code_point const *lookup_code_point(uint32_t);
+
+std::string lookup_code_point_name(uint32_t code_point);
+
 uint32_t const *unicode_decompose(uint32_t codePoint, bool compatible,
                                   uint8_t *len);
+
 int codepoint_to_utf8(uint32_t codePoint, uint8_t *utf8InputBuffer);
+
 int encode_utf16(uint32_t codePoint, uint8_t *buffer, bool little_endian);
+
 char const *general_category_description(general_category_value_t category);
+
+bool general_category_is_combining(general_category_value_t category);
+
 char const *get_block_name(uint32_t codepoint);
 
 struct program_options_t {

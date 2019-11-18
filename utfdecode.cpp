@@ -56,9 +56,13 @@ void program_options_t::encode_codepoint(uint32_t codepoint,
     utf8_buffer[utf8_byte_count] = 0;
     int wcwidth_value = wcwidth_musl(codepoint);
     if (wcwidth_value != -1) {
-      printf("'%s' = ", utf8_buffer);
+      char const *extra_whitespace =
+          general_category_is_combining(code_point_info->category) ? " " : "";
+      printf("%s%s = ", extra_whitespace, utf8_buffer);
     }
-    printf("U+%04X (%s)", codepoint, code_point_info->name);
+
+    auto name = lookup_code_point_name(codepoint);
+    printf("U+%04X %s", codepoint, name.c_str());
 
     if (this->block_info) {
       char const *plane_name = "???";
@@ -83,7 +87,6 @@ void program_options_t::encode_codepoint(uint32_t codepoint,
       char const *block_name = get_block_name(codepoint);
       printf(". Block %s in plane %s", block_name, plane_name);
 
-      printf(" (%s)", code_point_info->name);
       char const *category_description =
           general_category_description(code_point_info->category);
       printf(". Category: %s", category_description);
@@ -181,141 +184,8 @@ void program_options_t::print_byte_result(int byte, char const *msg, ...) {
   }
 }
 
-/* Assumes that the buffer is already validated. Does not handle overlong
- * encodings. */
-uint32_t utf8_sequence_to_codepoint(uint8_t *buffer, uint8_t length) {
-  uint32_t code_point;
-  uint32_t first_byte_mask;
-  switch (length) {
-  case 2:
-    first_byte_mask = 0x1F;
-    break;
-  case 3:
-    first_byte_mask = 0x0F;
-    break;
-  case 4:
-    first_byte_mask = 0x07;
-    break;
-  default:
-    die_with_internal_error("utf8_sequence_to_codepoint(): length=%d\n",
-                            (int)length);
-  }
-  code_point = (buffer[0] & first_byte_mask);
-  for (int i = 1; i < length; i++)
-    code_point = ((code_point << 6) | (uint32_t)(buffer[i] & 0x3F));
-  return code_point;
-}
-
-int codepoint_to_utf8(uint32_t codePoint, uint8_t *utf8InputBuffer) {
-  int bufferPosition = 0;
-  if (codePoint <= /* 7 bits */ 0b1111111) {
-    utf8InputBuffer[bufferPosition++] = (uint8_t)codePoint;
-  } else if (codePoint <= /* 11 bits */ 0b11111111111) {
-    /* 110xxxxx leading byte with leading 5 bits */
-    utf8InputBuffer[bufferPosition++] =
-        (uint8_t)(0b11000000 | (codePoint >> 6));
-    /* 10xxxxxx continuation byte with following 6 bits */
-    utf8InputBuffer[bufferPosition++] =
-        (uint8_t)(0b10000000 | (codePoint & 0b111111));
-  } else if (codePoint <= /* 16 bits */ 0b1111111111111111) {
-    /* 1110xxxx leading byte with leading 4 bits */
-    utf8InputBuffer[bufferPosition++] =
-        (uint8_t)(0b11100000 | (codePoint >> 12));
-    /* 10xxxxxx continuation byte with following 6 bits */
-    utf8InputBuffer[bufferPosition++] =
-        (uint8_t)(0b10000000 | ((codePoint >> 6) & 0b111111));
-    /* 10xxxxxx continuation byte with following 6 bits */
-    utf8InputBuffer[bufferPosition++] =
-        (uint8_t)(0b10000000 | (codePoint & 0b111111));
-  } else if (codePoint <= /* 21 bits */ 0b111111111111111111111) {
-    /* 11110xxx leading byte with leading 3 bits */
-    utf8InputBuffer[bufferPosition++] =
-        (uint8_t)(0b11110000 | (codePoint >> 18));
-    /* 10xxxxxx continuation byte with following 6 bits */
-    utf8InputBuffer[bufferPosition++] =
-        (uint8_t)(0b10000000 | ((codePoint >> 12) & 0b111111));
-    /* 10xxxxxx continuation byte with following 6 bits */
-    utf8InputBuffer[bufferPosition++] =
-        (uint8_t)(0b10000000 | ((codePoint >> 6) & 0b111111));
-    /* 10xxxxxx continuation byte with following 6 bits */
-    utf8InputBuffer[bufferPosition++] =
-        (uint8_t)(0b10000000 | (codePoint & 0b111111));
-  } else {
-    die_with_internal_error("codepoint_to_utf8(): invalid code point %d",
-                            codePoint);
-  }
-  return bufferPosition;
-}
-
-void program_options_t::process_utf8_byte(uint8_t byte, uint8_t *utf8_buffer, uint8_t &utf8_pos,
-                       uint8_t &remaining_utf8_continuation_bytes) {
-  bool invalid_utf8_seq = false;
-  if (byte <= 127) {
-    invalid_utf8_seq = (remaining_utf8_continuation_bytes > 0);
-    if (invalid_utf8_seq) {
-      note_error(byte, "expected continuation byte");
-    } else {
-      encode_codepoint(byte);
-    }
-  } else if ((byte & /*0b11000000=*/0xc0) == /*0b10000000=*/0x80) {
-    invalid_utf8_seq = (remaining_utf8_continuation_bytes == 0);
-    if (!invalid_utf8_seq) {
-      utf8_buffer[utf8_pos++] = byte;
-      --remaining_utf8_continuation_bytes;
-      if (remaining_utf8_continuation_bytes == 0) {
-        uint8_t used_length = utf8_pos;
-
-        utf8_buffer[used_length] = 0;
-        uint32_t code_point =
-            utf8_sequence_to_codepoint(utf8_buffer, used_length);
-        if (code_point > 0x10FFFF) {
-          note_error(byte, "code point out of range: %u", code_point);
-        } else if (code_point >= 0xD800 && code_point <= 0xDFFF) {
-          note_error(byte, "surrogate %u in UTF-8", code_point);
-        } else if (((code_point <= 0x80) && used_length > 1) ||
-                   (code_point < 0x800 && used_length > 2) ||
-                   (code_point < 0x10000 && used_length > 3)) {
-          note_error(byte, "overlong encoding of %u using %d bytes",
-                             code_point, used_length);
-        } else {
-          encode_codepoint(code_point);
-        }
-        remaining_utf8_continuation_bytes = 0;
-      }
-    }
-  } else {
-    int expect_following;
-    if ((byte & /*0b11100000=*/0xe0) == /*0b11000000=*/0xc0) {
-      expect_following = 1;
-    } else if ((byte & /*0b11110000=*/0xf0) == /*0b11100000=*/0xe0) {
-      expect_following = 2;
-    } else if ((byte & /*0b11111000=*/0xf8) == /*0b11110000=*/0xf0) {
-      expect_following = 3;
-    } else {
-      expect_following = -1;
-      invalid_utf8_seq = true;
-      note_error(byte, "invalid UTF-8 byte");
-    }
-    if (expect_following != -1) {
-      if (remaining_utf8_continuation_bytes == 0) {
-        remaining_utf8_continuation_bytes = expect_following;
-        utf8_pos = 1;
-        utf8_buffer[0] = byte;
-      } else {
-        invalid_utf8_seq = true;
-      }
-    }
-  }
-
-  // FIXME:
-  // https://github.com/jackpal/Android-Terminal-Emulator/commit/7335c643f758ce4351ac00813027ce1505f8dbd4
-  // - should continue with the current byte in the buffer
-  if (invalid_utf8_seq) {
-    remaining_utf8_continuation_bytes = 0;
-  }
-}
-
-void program_options_t::process_utf16_byte(uint8_t byte, uint8_t *state_buffer, uint8_t &state_pos) {
+void program_options_t::process_utf16_byte(uint8_t byte, uint8_t *state_buffer,
+                                           uint8_t &state_pos) {
   state_buffer[state_pos++] = byte;
   if (state_pos == 2) {
     uint16_t codeuint =
@@ -325,12 +195,10 @@ void program_options_t::process_utf16_byte(uint8_t byte, uint8_t *state_buffer, 
     if (codeuint >= 0xD800 && codeuint <= 0xDBFF) {
       print_byte_result(byte, "leading surrogate %d\n", codeuint);
     } else if (codeuint >= 0xDC00 && codeuint <= 0xDFFF) {
-      note_error(
-          byte, "trailing surrogate %d without leading surrogate before",
-          codeuint);
+      note_error(byte, "trailing surrogate %d without leading surrogate before",
+                 codeuint);
       state_pos = 0;
     } else {
-      print_byte_result(byte, "single UTF-16 code unit: ");
       encode_codepoint(codeuint);
       state_pos = 0;
     }
@@ -346,20 +214,19 @@ void program_options_t::process_utf16_byte(uint8_t byte, uint8_t *state_buffer, 
     uint32_t codepoint = 0x010000 +
                          (uint32_t(leading_surrogate - 0xD800) << 10) +
                          (trailing_surrogate - 0xDC00);
-    print_byte_result(byte, "trailing surrogate %d",
-                              trailing_surrogate);
+    print_byte_result(byte, "trailing surrogate %d", trailing_surrogate);
     encode_codepoint(codepoint);
     state_pos = 0;
   }
 }
 
-void program_options_t::process_utf32_byte(uint8_t byte, uint8_t *state_buffer, uint8_t &state_pos) {
+void program_options_t::process_utf32_byte(uint8_t byte, uint8_t *state_buffer,
+                                           uint8_t &state_pos) {
   state_buffer[state_pos++] = byte;
   if (state_pos == 4) {
     uint32_t codepoint = 0;
     for (int i = 0; i < 4; i++) {
-      int shift =
-          8 * ((input_format == input_format_t::UTF32LE) ? i : (3 - i));
+      int shift = 8 * ((input_format == input_format_t::UTF32LE) ? i : (3 - i));
       codepoint += (state_buffer[i] << shift) & (0xFF << shift);
     }
     print_byte_result(byte, "byte 4 of a UTF-32 code unit: ");
@@ -370,8 +237,8 @@ void program_options_t::process_utf32_byte(uint8_t byte, uint8_t *state_buffer, 
   }
 }
 
-void program_options_t::process_textual_codepoint_byte(uint8_t byte, uint8_t *state_buffer,
-                                    uint8_t &state_buffer_pos) {
+void program_options_t::process_textual_codepoint_byte(
+    uint8_t byte, uint8_t *state_buffer, uint8_t &state_buffer_pos) {
   if (byte == '\n' || byte == ' ' || byte == '\r' || byte == '\t') {
     if (state_buffer_pos > 0) {
       if (state_buffer_pos > 2 && state_buffer[0] == 'U' &&
@@ -383,8 +250,7 @@ void program_options_t::process_textual_codepoint_byte(uint8_t byte, uint8_t *st
       state_buffer[state_buffer_pos] = 0;
       long codepoint = strtol((char *)state_buffer, NULL, 0);
       if (codepoint == 0) {
-        note_error(byte, "cannot parse into code point: '%s'",
-                           state_buffer);
+        note_error(byte, "cannot parse into code point: '%s'", state_buffer);
       } else {
         encode_codepoint(codepoint);
       }
@@ -392,8 +258,7 @@ void program_options_t::process_textual_codepoint_byte(uint8_t byte, uint8_t *st
     }
   } else if (state_buffer_pos >= 16) {
     state_buffer[state_buffer_pos] = 0;
-    note_error(byte, "too large string '%s' - discarding",
-                       state_buffer);
+    note_error(byte, "too large string '%s' - discarding", state_buffer);
   } else {
     state_buffer[state_buffer_pos++] = byte;
   }
@@ -466,7 +331,8 @@ void program_options_t::read_and_echo() {
         break;
       }
       bytes_into_input++;
-      if (byte_skip_limit != 0 && ((byte_skip_limit + byte_skip_offset) <= bytes_into_input)) {
+      if (byte_skip_limit != 0 &&
+          ((byte_skip_limit + byte_skip_offset) <= bytes_into_input)) {
         end_of_input = true;
         break;
       }
@@ -476,4 +342,3 @@ void program_options_t::read_and_echo() {
       return;
   }
 }
-

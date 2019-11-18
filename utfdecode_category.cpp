@@ -86,4 +86,15 @@ char const *general_category_description(general_category_value_t category) {
   }
 }
 
+bool general_category_is_combining(general_category_value_t category) {
+	switch (category) {
+	case general_category_value_t::Nonspacing_Mark:
+	case general_category_value_t::Spacing_Mark:
+	case general_category_value_t::Enclosing_Mark:
+		return true;
+	default:
+		return false;
+	}
+}
+
 #endif
