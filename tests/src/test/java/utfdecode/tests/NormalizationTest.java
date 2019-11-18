@@ -107,11 +107,7 @@ class NormalizationTest {
         var s = "\uCE31";
         for (var form : List.of(Normalizer.Form.NFD, Normalizer.Form.NFKD)) {
             var normalizedByJava = Normalizer.normalize(s, form);
-            normalizedByJava.codePoints().forEach(c -> {
-                System.out.println("U+" + Integer.toHexString(c));
-            });
             Assertions.assertEquals("\u110E\u1173\u11B8", normalizedByJava);
-
             var normalizedByUtfDecode = Utfdecode.getUtf8Output(s, form);
             Assertions.assertEquals(normalizedByJava, normalizedByUtfDecode);
         }

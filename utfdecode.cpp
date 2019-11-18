@@ -27,21 +27,37 @@ void program_options_t::encode_codepoint(uint32_t codepoint,
     uint8_t len;
     uint32_t const *decomposed = unicode_decompose(codepoint, compatible, &len);
     if (len == 0) {
-      if (!output_non_starters) {
-        bool is_starter = code_point_info->canonical_combining_class == 0;
-        if (is_starter) {
-          std::vector<uint32_t> non_starters_copy =
-              this->normalization_non_starters;
-          this->normalization_non_starters.clear();
+      if (codepoint >= 0xAC00 && codepoint <= 0xD7A3) {
+        // Hangul decomposition.
+        // https://stackoverflow.com/a/53114472/300710
+        uint32_t diff = codepoint - 0xAC00;
+        uint32_t rest = diff % 28;
+        uint32_t quotient = diff / 28;
+        uint32_t v_jamo = (quotient % 21) + 0x1161;
+        uint32_t l_jamo = (quotient / 21) + 0x1100;
+        this->encode_codepoint(l_jamo, true);
+        this->encode_codepoint(v_jamo, true);
+        if (rest != 0) {
+          uint32_t t_jamo = rest + 0x11A7;
+          this->encode_codepoint(t_jamo, true);
+        }
+        return;
+      } else {
+        if (!output_non_starters) {
+          bool is_starter = code_point_info->canonical_combining_class == 0;
+          if (is_starter) {
+            std::vector<uint32_t> non_starters_copy =
+                this->normalization_non_starters;
+            this->normalization_non_starters.clear();
 
-          flush_normalization_non_starters(non_starters_copy);
-        } else {
-          this->normalization_non_starters.push_back(codepoint);
-          return;
+            flush_normalization_non_starters(non_starters_copy);
+          } else {
+            this->normalization_non_starters.push_back(codepoint);
+            return;
+          }
         }
       }
     } else {
-      // TODO: Recursive decomposition
       for (uint8_t i = 0; i < len; i++) {
         this->encode_codepoint(decomposed[i], true);
       }
